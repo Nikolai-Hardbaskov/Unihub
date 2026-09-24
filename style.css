@@ -328,3 +328,14 @@
 #unihub-phone .sh-quest.done b { text-decoration: line-through; color: var(--sh-mute); }
 #unihub-phone .sh-quest p { margin: 3px 0; font-size: 13px; }
 #unihub-phone .sh-quest .sh-btn { margin-top: 6px; }
+
+#unihub-phone .sh-pending { border-color: var(--sh-amber); }
+#unihub-phone .sh-pending b i { color: var(--sh-amber); margin-right: 4px; }
+
+#unihub-phone button.sh-pill { border: 0; color: var(--sh-amber); cursor: pointer; }
+#unihub-phone .sh-star { width: 36px; text-align: center; font-size: 22px; }
+@media (max-width: 640px) {
+    #unihub-phone .sh-brand { font-size: 16px; }
+    #unihub-phone .sh-status { gap: 4px; }
+    #unihub-phone .sh-pill { padding: 2px 5px; font-size: 10.5px; }
+}

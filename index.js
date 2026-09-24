@@ -342,6 +342,17 @@
         }
         return out.join('\n');
     }
+    /** Последнее сообщение истории полностью — «что происходит прямо сейчас». */
+    function currentScene() {
+        const chat = ctx().chat || [];
+        for (let i = chat.length - 1; i >= 0; i--) {
+            const m = chat[i];
+            if (!m || m.is_system || !m.mes) continue;
+            const txt = String(m.mes).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+            if (txt) return `${m.name}: ${txt.length > 2000 ? `…${txt.slice(-2000)}` : txt}`;
+        }
+        return '';
+    }
     /** Записи лорбука, чьи ключи встречаются в тексте, плюс постоянные записи. */
     async function loreFor(text) {
         const c = ctx();
@@ -771,6 +782,23 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
     }
     const fmtWhen = (ts) => `${dayWord(ts)} в ${fmtT(ts)}`;
     const meetText = (m) => `${KINDS[m.kind].toLowerCase()} с ${m.with}, ${PLACES[m.place]}${m.note ? ` (${m.note})` : ''}`;
+    const isoDay = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+    /** Возвращает текст ошибки или пустую строку. */
+    function meetProblem(s, at, place) {
+        if (!Number.isFinite(at) || at < Date.now() + 5 * MIN) return 'Выберите время хотя бы через 5 минут.';
+        if (s.meetings.some((m) => m.status === 'accepted' && Math.abs(m.at - at) < HOUR)) return 'На это время уже назначена другая встреча.';
+        const ov = occurrences(s, at - 3 * HOUR, at + HOUR).find((o) => o.start < at + HOUR && o.end > at);
+        if (place === 'skip' && !ov) return 'В это время нет пар. Выберите другой вариант.';
+        if (place !== 'skip' && ov) return `Встреча пересекается с парой «${ov.cl.subject}». Выберите «вместо пар», если готовы прогулять, или другое время.`;
+        return '';
+    }
+    function addMeeting(s, th, kind, place, note, at) {
+        const m = { id: uid(), with: th.name, threadId: th.id, kind, place, note, at, status: 'accepted', created: Date.now() };
+        s.meetings.push(m);
+        notify(s, `📅 Встреча добавлена: ${meetText(m)}, ${fmtWhen(at)}`, 'important');
+        questEvent(s, 'meet');
+        return m;
+    }
     function startMeeting(s, m) {
         m.status = 'started';
         notify(s, `⏰ Сейчас: ${meetText(m)}. Встреча начинается в истории.`, 'important');
@@ -889,7 +917,7 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
         return `<span class="sh-clock">${fmtT(Date.now())}</span>
         <span class="sh-brand">UniHub</span>
         <span class="sh-sb-right">
-          ${s && s.auth ? `<span class="sh-pill" title="Рейтинг">${rating(s)}%</span><span class="sh-pill" title="Баланс">${money(s.wallet.balance)}</span>` : ''}
+          ${s && s.auth ? `<span class="sh-pill" title="Рейтинг">${rating(s)}%</span><button class="sh-pill" data-act="go" data-view="me" title="Авторитет">⭐ ${Math.round(soc(s).authority)}</button><span class="sh-pill" title="Баланс">${money(s.wallet.balance)}</span>` : ''}
           <button class="sh-icon" data-act="go" data-view="notes" aria-label="Уведомления"><i class="fa-solid fa-bell"></i>${unread ? `<b class="sh-dot">${unread}</b>` : ''}</button>
           <button class="sh-icon" data-act="close" aria-label="Закрыть"><i class="fa-solid fa-xmark"></i></button>
         </span>`;
@@ -1108,6 +1136,12 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
         return `${head(th.name, `${th.species ? esc(th.species) + ', ' : ''}<i class="fa-solid fa-lock"></i> зашифровано`)}
         ${th.kind === 'group' ? '' : `<div class="sh-rel"><div><small>${rl}${th.beef ? ' · бифф' : ''}${th.kind === 'char' && s.profile.relWithChar ? ' · вы пара' : ''}</small><div class="sh-relbar"><span class="${rv < 0 ? 'neg' : ''}" style="width:${Math.abs(rv) / 2}%;${rv < 0 ? 'right:50%' : 'left:50%'}"></span></div></div>
           <button class="sh-btn sm ghost" data-act="go" data-view="meet" data-param="${th.id}"><i class="fa-solid fa-calendar-plus"></i> Встреча</button></div>`}
+        ${th.pendingMeet ? `<div class="sh-card sh-pending"><b><i class="fa-solid fa-handshake"></i> Похоже, вы договорились о встрече</b>
+          <small>${esc(KINDS[th.pendingMeet.kind])}, ${fmtWhen(th.pendingMeet.at)}, ${esc(PLACES[th.pendingMeet.place])}${th.pendingMeet.note ? ` (${esc(th.pendingMeet.note)})` : ''}</small>
+          ${th.pendingMeet.conflict ? `<small class="sh-bad-t"><i class="fa-solid fa-triangle-exclamation"></i> В это время у вас пара «${esc(th.pendingMeet.conflict.subject)}» (${fmtT(th.pendingMeet.conflict.start)}–${fmtT(th.pendingMeet.conflict.end)}).</small>
+          <div class="sh-row"><button class="sh-btn sm" data-act="mentionClass" data-id="${th.id}"><i class="fa-regular fa-comment"></i> Написать про пару</button><button class="sh-btn sm ghost" data-act="skipPending" data-id="${th.id}">Прогулять</button></div>` : ''}
+          ${th.pendingMeet.problem ? `<small class="sh-bad-t">${esc(th.pendingMeet.problem)}</small>` : ''}
+          <div class="sh-row">${th.pendingMeet.problem || th.pendingMeet.conflict ? '' : `<button class="sh-btn sm" data-act="acceptPending" data-id="${th.id}">Добавить встречу</button>`}<button class="sh-btn sm ghost" data-act="go" data-view="meet" data-param="${th.id}">Изменить</button><button class="sh-btn sm ghost" data-act="dropPending" data-id="${th.id}">Нет</button></div></div>` : ''}
         <div class="sh-msgs">${th.msgs.map((m) => m.sys
         ? `<div class="sh-sys">${esc(m.text)}</div>`
         : `<div class="sh-msg ${m.me ? 'me' : ''}">${m.from ? `<b>${esc(m.from)}</b>` : ''}${esc(m.text)}<time>${fmtT(m.t)}</time></div>`).join('')}
@@ -1144,7 +1178,7 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
         const top = `<div class="sh-idcard">
           ${ava(s.profile.name, true)}
           <div><b>${esc(s.profile.name)}</b><small>${esc(s.profile.faculty)}, ${s.profile.year} курс</small>${badge(s.profile.species || 'вид не указан')}</div>
-          <div class="sh-seal ${rating(s) < 40 ? 'bad' : rating(s) < 70 ? 'warn' : ''}"><b>${rating(s)}%</b><small>рейтинг</small></div>
+          <div class="sh-seal ${rating(s) < 40 ? 'bad' : rating(s) < 70 ? 'warn' : ''}" title="Академический рейтинг"><b>${rating(s)}%</b><small>рейтинг</small></div>
         </div>
         ${s.pausedAt ? '<div class="sh-note warn"><i class="fa-solid fa-pause"></i> Время учёбы на паузе. Пары и дедлайны не идут.</div>' : ''}
         <div class="sh-chips">${STUDY_TABS.map(([k, l]) => `<button class="sh-chip ${ui.studyTab === k ? 'on' : ''}" data-act="studyTab" data-st="${k}">${l}</button>`).join('')}</div>`;
@@ -1253,16 +1287,20 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
     function meetView(s, thId) {
         const th = s.threads.find((t) => t.id === thId);
         if (!th) return head('Встреча') + empty('Диалог не найден.');
-        const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return `<option value="${i}">${i === 0 ? 'Сегодня' : i === 1 ? 'Завтра' : d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })}</option>`; }).join('');
-        return `${head('Назначить встречу', esc(th.name))}
+        const pm = th.pendingMeet;
+        const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+        const pmDay = pm ? clamp(Math.round((new Date(pm.at).setHours(0, 0, 0, 0) - t0) / DAY), 0, 6) : 0;
+        const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return `<option value="${i}" ${i === pmDay ? 'selected' : ''}>${i === 0 ? 'Сегодня' : i === 1 ? 'Завтра' : d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })}</option>`; }).join('');
+        return `${head(pm ? 'Добавить встречу' : 'Назначить встречу', esc(th.name))}
+        ${pm ? `<div class="sh-note important"><i class="fa-solid fa-handshake"></i><span>Поля заполнены по вашей договорённости в переписке. Проверьте и сохраните.</span></div>` : ''}
         <div class="sh-card sh-form">
-          <label>Тип<select id="sh-m-kind">${Object.entries(KINDS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+          <label>Тип<select id="sh-m-kind">${Object.entries(KINDS).map(([k, v]) => `<option value="${k}" ${pm?.kind === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
           <label>День<select id="sh-m-day">${days}</select></label>
-          <label>Время<input id="sh-m-time" type="time" value="18:00"></label>
-          <label>Где и когда<select id="sh-m-place">${Object.entries(PLACES).map(([k, v]) => `<option value="${k}">${v[0].toUpperCase()}${v.slice(1)}</option>`).join('')}</select></label>
-          <label>Детали<input id="sh-m-note" placeholder="Например: у фонтана, в комнате 214"></label>
+          <label>Время<input id="sh-m-time" type="time" value="${pm ? fmtT(pm.at) : '18:00'}"></label>
+          <label>Где и когда<select id="sh-m-place">${Object.entries(PLACES).map(([k, v]) => `<option value="${k}" ${pm?.place === k ? 'selected' : ''}>${v[0].toUpperCase()}${v.slice(1)}</option>`).join('')}</select></label>
+          <label>Детали<input id="sh-m-note" placeholder="Например: у фонтана, в комнате 214" value="${esc(pm?.note || '')}"></label>
           <p class="sh-muted">Встреча длится около часа. «Вместо пар» засчитывается как прогул. За день до встречи и в сам день придут напоминания, а в назначенное время встреча начнётся в основной истории. Отменить можно до начала.</p>
-          <button class="sh-btn" data-act="proposeMeet" data-id="${th.id}"><i class="fa-solid fa-paper-plane"></i> Пригласить</button>
+          ${pm ? `<button class="sh-btn" data-act="proposeMeet" data-id="${th.id}" data-agreed="1"><i class="fa-solid fa-check"></i> Сохранить встречу</button>` : `<button class="sh-btn" data-act="proposeMeet" data-id="${th.id}"><i class="fa-solid fa-paper-plane"></i> Пригласить</button>`}
         </div>`;
     }
     const MEET_ST = { accepted: ['запланирована', 'mid'], started: ['идёт сейчас', 'live'], done: ['состоялась', 'ok'], cancelled: ['отменена', 'mid'], missed: ['пропущена', 'bad'] };
@@ -1357,6 +1395,7 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
         const tog = (k, l) => `<label class="sh-toggle"><input type="checkbox" data-change="privacy" data-k="${k}" ${pr[k] ? 'checked' : ''}><span>${l}</span></label>`;
         return `${head('Профиль')}
         <div class="sh-idcard">${ava(p.name, true)}<div><b>${esc(p.name)}</b><small>${pr.faculty ? esc(p.faculty) : 'факультет скрыт'}, ${p.year} курс</small>${pr.abilities && p.abilities ? badge(p.abilities === NO_ABIL ? 'без способностей' : p.abilities) : ''}${pr.species ? badge(p.species || 'вид не указан') : badge('вид скрыт')}</div></div>
+        <button class="sh-me" data-act="go" data-view="me"><span class="sh-star">⭐</span><div><b>Авторитет: ${Math.round(soc(s).authority)}</b><small>Уровень ${levelOf(soc(s))} · ${kfmt(soc(s).followers)} подписчиков · задания дня</small></div><i class="fa-solid fa-chevron-right"></i></button>
         <div class="sh-card sh-form">
           <label>Имя<input id="sh-pf-name" value="${esc(p.name)}"></label>
           ${identityFields('sh-pf', p)}
@@ -1391,7 +1430,7 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.6.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.7.2 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -1470,6 +1509,24 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
         return th;
     }
 
+    /** Договорённость о встрече, распознанная в переписке. */
+    function detectMeet(s, th, mt) {
+        const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(mt.date || '').trim());
+        const tm = /^(\d{1,2}):(\d{2})$/.exec(String(mt.time || '').trim());
+        if (!dm || !tm) return;
+        const at = new Date(+dm[1], +dm[2] - 1, +dm[3], +tm[1], +tm[2]).getTime();
+        if (!(at > Date.now()) || at > Date.now() + 7 * DAY) return;
+        if (s.meetings.some((m) => m.threadId === th.id && (m.status === 'accepted' || m.status === 'started') && Math.abs(m.at - at) < 2 * HOUR)) return;
+        const key = `${isoDay(at)} ${fmtT(at)}`;
+        if ((th.dismissedMeets || []).includes(key)) return;
+        let place = PLACES[mt.place] ? mt.place : 'after';
+        const ov = occurrences(s, at - 3 * HOUR, at + HOUR).find((o) => o.start < at + HOUR && o.end > at);
+        if (!ov && place === 'skip') place = 'after';
+        th.pendingMeet = { at, key, kind: KINDS[mt.kind] ? mt.kind : 'friends', place, note: cleanMsg(mt.note || '').slice(0, 80), problem: '' };
+        if (ov && place !== 'skip') th.pendingMeet.conflict = { subject: ov.cl.subject, start: ov.start, end: ov.end };
+        else th.pendingMeet.problem = meetProblem(s, at, place);
+        if (!(ui.open && ui.view === 'thread' && ui.param === th.id)) notify(s, `🤝 Похоже, вы договорились с ${th.name} о встрече ${fmtWhen(at)}. Подтвердите в чате.`, 'important');
+    }
     async function reply(s, th) {
         th.typing = true; render();
         const hist = th.msgs.filter((m) => !m.sys).slice(-14).map((m) => `${m.me ? s.profile.name : (m.from || th.name)}: ${m.text}`).join('\n');
@@ -1477,7 +1534,8 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
         if (th.kind === 'char') {
             const story = recentStory(Number(cfg().chatContext) || 0);
             const lore = await loreFor(`${story}\n${hist}`);
-            extra = `\n\n${charCard()}${lore ? `\n\nЛор мира, связанный с разговором:\n${lore}` : ''}${story ? `\n\nПоследние события основной истории (${th.name} их помнит и может на них ссылаться; переписка идёт параллельно с этими событиями):\n${story}` : ''}`;
+            const scene = currentScene();
+            extra = `\n\n${charCard()}${lore ? `\n\nЛор мира, связанный с разговором:\n${lore}` : ''}${story ? `\n\nПоследние события основной истории (${th.name} их помнит):\n${story}` : ''}${scene ? `\n\n=== ТЕКУЩИЙ МОМЕНТ ИСТОРИИ (самое важное) ===\n${scene}\n=== конец ===\nПереписка происходит ПРЯМО СЕЙЧАС, в этот самый момент истории. Строго соблюдай его: где находится ${th.name}, что делает, рядом ли ${s.profile.name}, время суток. Нельзя противоречить сцене — например, писать «я на патруле», если в сцене ${th.name} стоит у двери ${s.profile.name}. Если они сейчас рядом, ${th.name} может удивиться сообщению («я же прямо за дверью»), ответить вслух или написать с учётом этого.` : ''}`;
         }
         const who = th.kind === 'group'
             ? `участников учебной группы «${th.name}» (${th.bio}). Пиши от лица одного из участников в формате "Имя: текст".`
@@ -1485,16 +1543,18 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
                 ? `${th.name} — персонажа текущей истории. Строго сохраняй его характер, отношение к ${s.profile.name}, манеру речи и словечки из карточки и примеров; учитывай события истории. Пиши так, как этот персонаж писал бы в мессенджере.`
                 : `${th.name}${th.species ? ` (вид: ${th.species})` : ''}${th.bio ? `. О себе: ${th.bio}` : ''}`;
         const relTxt = th.kind === 'group' ? '' : `\nОтношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100, шкала от −100 вражда до 100 близость).${th.kind === 'char' && s.profile.relWithChar ? ` ${th.name} и ${s.profile.name} — пара.` : ''}${jealousNote(s, th)}`;
-        const raw = await aiRaw(`${world(s)}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist}\n\nНапиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false}`}`);
+        const raw = await aiRaw(`${world(s)}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist}\n\nНапиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date().toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(Date.now())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
         th.typing = false;
         if (S() !== s) return;
         const js = th.kind === 'group' ? null : parseJSON(raw);
         let r = js && typeof js.reply === 'string' ? js.reply : stripThink(raw).trim().replace(/^["«]+|["»]+$/g, '');
         if (js && th.kind !== 'group') updateRel(s, th, Number(js.delta) || 0, js.flirt === true || js.flirt === 'true');
+        if (js?.meet && typeof js.meet === 'object') detectMeet(s, th, js.meet);
         if (r) {
             let from;
             if (th.kind === 'group') { const m = r.match(/^\s*[*_]{0,2}([^:*_\n]{2,30})[*_]{0,2}\s*:\s*[*_]{0,2}\s*/); if (m) { from = m[1].trim(); r = r.slice(m[0].length); } }
             else r = r.replace(new RegExp(`^\\s*[*_]{0,2}${escRe(th.name)}[*_]{0,2}\\s*:?\\s*[*_]{0,2}\\s*`, 'i'), '');
+            r = r.replace(/^\s*(\*\*|__)[^*_\n]{1,60}(\*\*|__)\s*:?\s*\n+/, '').replace(/^\s*[A-Za-zА-Яа-яЁё][^:\n]{0,40}:\s*\n+/, '');
             r = cleanMsg(r);
             th.msgs.push({ me: false, from, text: r, t: Date.now() });
             th.t = Date.now();
@@ -1630,13 +1690,19 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
             const [hh, mm] = (val('sh-m-time') || '18:00').split(':').map(Number);
             const day = new Date(); day.setDate(day.getDate() + (parseInt(val('sh-m-day'), 10) || 0)); day.setHours(hh || 0, mm || 0, 0, 0);
             const at = day.getTime(), now = Date.now();
-            if (at < now + 5 * MIN) return toast('warning', 'Выберите время хотя бы через 5 минут.');
-            if (s.meetings.some((m) => (m.status === 'accepted') && Math.abs(m.at - at) < HOUR)) return toast('warning', 'На это время уже назначена другая встреча.');
-            const ov = occurrences(s, at - 3 * HOUR, at + HOUR).find((o) => o.start < at + HOUR && o.end > at);
-            if (place === 'skip' && !ov) return toast('warning', 'В это время нет пар. Выберите другой вариант.');
-            if (place !== 'skip' && ov) return toast('warning', `Встреча пересекается с парой «${ov.cl.subject}». Выберите «вместо пар», если готовы прогулять, или другое время.`);
+            const bad = meetProblem(s, at, place);
+            if (bad) return toast('warning', bad);
+            if (d.agreed) {
+                addMeeting(s, th, kind, place, note, at);
+                th.pendingMeet = null;
+                th.msgs.push({ sys: true, text: `📅 Встреча добавлена: ${KINDS[kind].toLowerCase()}, ${fmtWhen(at)}, ${PLACES[place]}${note ? ` (${note})` : ''}`, t: now });
+                updateRel(s, th, 1, kind === 'date');
+                ui.view = 'thread'; ui.param = th.id;
+                save(s); render();
+                return;
+            }
             return withBusy(`Ждём ответа от ${th.name}…`, async () => {
-                const m = { id: uid(), with: th.name, threadId: th.id, kind, place, note, at, status: 'accepted', created: now };
+                const m = { with: th.name, kind, place, note };
                 th.msgs.push({ me: true, text: `📅 Приглашение: ${meetText(m)}, ${fmtWhen(at)}`, t: now });
                 const r = await aiJSON(`${world(s)}${th.kind === 'char' ? `
 ${charCard()}` : ''}
@@ -1647,14 +1713,49 @@ ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species}
                 th.msgs.push({ me: false, text: cleanMsg(r?.reply || (accept ? 'Давай!' : 'Прости, не получится.')).slice(0, 500), t: Date.now() });
                 th.t = Date.now();
                 if (accept) {
-                    s.meetings.push(m);
-                    notify(s, `📅 ${th.name} согласен(на): ${meetText(m)}, ${fmtWhen(at)}`, 'important');
-                    questEvent(s, 'meet');
+                    addMeeting(s, th, kind, place, note, at);
                     updateRel(s, th, 2, kind === 'date');
                 } else updateRel(s, th, -1, false);
                 ui.view = 'thread'; ui.param = th.id;
                 save(s);
             });
+        },
+        mentionClass: (d, el, s) => {
+            const th = s.threads.find((t) => t.id === d.id);
+            const pm = th?.pendingMeet;
+            if (!pm?.conflict || th.typing) return;
+            th.msgs.push({ me: true, text: `Ой, подожди… ${dayWord(pm.at)} в это время у меня пара «${pm.conflict.subject}» до ${fmtT(pm.conflict.end)} 😅`, t: Date.now(), classConflict: true });
+            th.t = Date.now();
+            th.pendingMeet = null;
+            save(s); render();
+            return reply(s, th);
+        },
+        skipPending: (d, el, s) => {
+            const th = s.threads.find((t) => t.id === d.id);
+            const pm = th?.pendingMeet;
+            if (!pm) return;
+            if (!confirm(`Встреча будет вместо пары «${pm.conflict?.subject || ''}» — это прогул и нарушение. Продолжить?`)) return;
+            pm.place = 'skip'; pm.conflict = null; pm.problem = meetProblem(s, pm.at, 'skip');
+            save(s); render();
+        },
+        acceptPending: (d, el, s) => {
+            const th = s.threads.find((t) => t.id === d.id);
+            const pm = th?.pendingMeet;
+            if (!pm) return;
+            const bad = meetProblem(s, pm.at, pm.place);
+            if (bad) { pm.problem = bad; return render(); }
+            addMeeting(s, th, pm.kind, pm.place, pm.note, pm.at);
+            th.msgs.push({ sys: true, text: `📅 Встреча добавлена: ${KINDS[pm.kind].toLowerCase()}, ${fmtWhen(pm.at)}, ${PLACES[pm.place]}${pm.note ? ` (${pm.note})` : ''}`, t: Date.now() });
+            th.pendingMeet = null;
+            save(s); render();
+        },
+        dropPending: (d, el, s) => {
+            const th = s.threads.find((t) => t.id === d.id);
+            if (!th?.pendingMeet) return;
+            (th.dismissedMeets ||= []).push(th.pendingMeet.key);
+            if (th.dismissedMeets.length > 20) th.dismissedMeets.shift();
+            th.pendingMeet = null;
+            save(s); render();
         },
         cancelMeet: (d, el, s) => {
             const m = s.meetings.find((x) => x.id === d.id);
