@@ -113,6 +113,18 @@
         { title: 'Кресло-гнездо для крылатых', cat: 'Мебель', price: 1200, rent: 0, seller: 'Селеста Вингс', rating: 4.7, verified: false },
         { title: 'Конспекты по межвидовому праву', cat: 'Учебники', price: 150, rent: 0, seller: 'Оуэн, 4 курс', rating: 4.2, verified: false },
     ];
+    const SPECIES = ['Человек', 'Вампир', 'Полувампир', 'Оборотень', 'Полуоборотень', 'Фейри', 'Эльф', 'Демон', 'Полудемон', 'Нефилим', 'Ведьма / колдун', 'Сирена', 'Русалка', 'Призрак', 'Дракон (в облике человека)', 'Кицунэ', 'Гарпия', 'Горгона', 'Суккуб / инкуб', 'Голем'];
+    // v: true — способность заметна со стороны
+    const ABILITIES = [
+        { n: 'Телепатия', v: false }, { n: 'Эмпатия', v: false }, { n: 'Предвидение', v: false }, { n: 'Внушение', v: false },
+        { n: 'Регенерация', v: false }, { n: 'Сверхсила', v: false }, { n: 'Сверхскорость', v: false }, { n: 'Невидимость', v: false },
+        { n: 'Целительство', v: false }, { n: 'Некромантия', v: false }, { n: 'Чары голоса', v: false }, { n: 'Обострённые чувства', v: false },
+        { n: 'Телекинез', v: true }, { n: 'Управление огнём', v: true }, { n: 'Управление водой', v: true }, { n: 'Управление тенями', v: true },
+        { n: 'Иллюзии', v: true }, { n: 'Крылья', v: true }, { n: 'Рога / хвост / чешуя', v: true }, { n: 'Светящиеся глаза', v: true },
+        { n: 'Видимая аура', v: true }, { n: 'Оборот в зверя', v: true },
+    ];
+    const NO_ABIL = 'Отсутствуют';
+    const MAX_YEAR = 5;
     const MARKET_CATS = ['Учебники', 'Мебель', 'Электроника', 'Оборудование'];
     const CLUBS = ['Клуб ночных астрономов', 'Хор сирен', 'Лига регби оборотней', 'Кружок зельеварения', 'Дебатный клуб «Меж видов»', 'Фотоклуб «Без отражения»'];
     const ROOMS = ['Лаборатория алхимии', 'Звукоизолированная комната (полнолуние)', 'Читальный зал без окон', 'Бассейн с морской водой', 'Огнеупорный тренировочный зал', 'Переговорная'];
@@ -297,9 +309,23 @@
         }
         return out;
     }
+    function abilityInfo(p) {
+        if (!p.abilities) return 'не указаны';
+        if (p.abilities === NO_ABIL) return 'отсутствуют';
+        return `${p.abilities} (${p.abilityVisible ? 'заметна окружающим' : 'со стороны не видна'})`;
+    }
+    /** Как окружающие реагируют на вид и способности пользователя. */
+    function reactionGuide(s) {
+        const p = s.profile, L = [];
+        if (p.species) L.push(`Студенты и преподаватели реагируют на то, что ${p.name} — ${p.species}: в зависимости от своего вида (симпатия, опаска, предрассудки, давнее соперничество видов, любопытство, гастрономический интерес и т.п.)${/^человек$/i.test(p.species) ? '; обычный человек среди сверхъестественных — редкость и повод для удивления' : ''}.`);
+        if (p.abilities === NO_ABIL) L.push(`У ${p.name} НЕТ сверхъестественных способностей. Окружающие искренне удивляются этому, переспрашивают, недоумевают, сочувствуют или подшучивают.`);
+        else if (p.abilities && p.abilityVisible) L.push(`Способность ${p.name} («${p.abilities}») заметна со стороны: окружающие её видят и реагируют — восхищаются, опасаются, завидуют, задают вопросы.`);
+        else if (p.abilities) L.push(`Способность ${p.name} («${p.abilities}») со стороны не видна: окружающие не реагируют на неё, пока она не проявится или ${p.name} сам(а) не расскажет. Если проявилась — реагируют по ситуации.`);
+        return L.join(' ');
+    }
     function world(s) {
         const p = s.profile;
-        return `Мир: университет, где учатся люди, полулюди и сверхъестественные виды.\n${charInfo()}\nСтудент-пользователь: ${p.name}; вид: ${p.species || 'не указан'}; способности: ${p.abilities || '—'}; факультет: ${p.faculty || 'не выбран'}; курс: ${p.year}.`;
+        return `Мир: университет, где учатся люди, полулюди и сверхъестественные виды.\n${charInfo()}\nСтудент-пользователь: ${p.name}; вид: ${p.species || 'не указан'}; способности: ${abilityInfo(p)}; факультет: ${p.faculty || 'не выбран'}; курс: ${p.year}.\n${reactionGuide(s)}`;
     }
     async function loreText(filterRe) {
         const c = ctx();
@@ -489,6 +515,8 @@
         }
         const recent = s.notes.filter((n) => (n.type === 'warn' || n.type === 'bad' || n.type === 'important') && Date.now() - n.t < DAY).slice(0, 3);
         if (recent.length) L.push(`Недавние события: ${recent.map((n) => n.text).join(' | ')}`);
+        const rg = reactionGuide(s);
+        if (rg) L.push(`Способности: ${abilityInfo(p)}. ${rg}`);
         L.push('Учитывай это в повествовании (реакции преподавателей, куратора, окружающих, последствия), не пересказывай статус дословно.');
         return L.join('\n');
     }
@@ -553,9 +581,7 @@
         return `<div class="sh-auth">
           <div class="sh-crest"><i class="fa-solid fa-graduation-cap"></i><h2>UniHub</h2><p>Вход через университетскую учётную запись</p></div>
           <label>Имя студента<input id="sh-a-name" value="${esc(p.name)}"></label>
-          <label>Вид<input id="sh-a-species" placeholder="человек, вампир, оборотень, фейри…" value="${esc(p.species)}"></label>
-          <label>Способности<input id="sh-a-abil" placeholder="необязательно" value="${esc(p.abilities)}"></label>
-          <label>Курс<input id="sh-a-year" type="number" min="1" max="6" value="${esc(p.year)}"></label>
+          ${identityFields('sh-a', p)}
           <h4>Факультет</h4>
           ${s.faculties.length
         ? `<div class="sh-fac-list">${s.faculties.map((f, i) => `<button class="sh-fac ${p.faculty === f.name ? 'on' : ''}" data-act="pickFac" data-i="${i}"><b>${esc(f.name)}</b>${f.desc ? `<small>${esc(f.desc)}</small>` : ''}${f.source === 'lore' ? '<em>из лора</em>' : ''}</button>`).join('')}</div>`
@@ -565,12 +591,42 @@
           <button class="sh-btn" data-act="login"><i class="fa-solid fa-right-to-bracket"></i> Войти и составить расписание</button>
         </div>`;
     }
+    function identityFields(pre, p) {
+        const spKnown = SPECIES.includes(p.species);
+        const abKnown = p.abilities === NO_ABIL || ABILITIES.some((a) => a.n === p.abilities);
+        const spOther = !!p.species && !spKnown;
+        const abOther = !!p.abilities && !abKnown;
+        const hidden = (b) => (b ? '' : ' style="display:none"');
+        return `
+          <label>Вид<select id="${pre}-species" data-change="idSel" data-other="${pre}-species-o">
+            <option value="">— выберите —</option>
+            ${SPECIES.map((x) => `<option ${x === p.species ? 'selected' : ''}>${esc(x)}</option>`).join('')}
+            <option value="__other" ${spOther ? 'selected' : ''}>Другой вид…</option>
+          </select></label>
+          <div id="${pre}-species-o" class="sh-other"${hidden(spOther)}><input id="${pre}-species-t" placeholder="Название вида" value="${esc(spOther ? p.species : '')}"></div>
+          <label>Способности<select id="${pre}-abil" data-change="idSel" data-other="${pre}-abil-o">
+            <option value="">— выберите —</option>
+            <option value="${NO_ABIL}" ${p.abilities === NO_ABIL ? 'selected' : ''}>Отсутствуют</option>
+            <optgroup label="Не видны со стороны">${ABILITIES.filter((a) => !a.v).map((a) => `<option ${a.n === p.abilities ? 'selected' : ''}>${esc(a.n)}</option>`).join('')}</optgroup>
+            <optgroup label="Заметны окружающим">${ABILITIES.filter((a) => a.v).map((a) => `<option ${a.n === p.abilities ? 'selected' : ''}>${esc(a.n)}</option>`).join('')}</optgroup>
+            <option value="__other" ${abOther ? 'selected' : ''}>Другая способность…</option>
+          </select></label>
+          <div id="${pre}-abil-o" class="sh-other"${hidden(abOther)}><input id="${pre}-abil-t" placeholder="Опишите способность" value="${esc(abOther ? p.abilities : '')}">
+            <label class="sh-toggle"><input type="checkbox" id="${pre}-abil-v" ${abOther && p.abilityVisible ? 'checked' : ''}><span>Способность видна окружающим</span></label></div>
+          <label>Курс<select id="${pre}-year">${Array.from({ length: MAX_YEAR }, (_, i) => `<option value="${i + 1}" ${+p.year === i + 1 ? 'selected' : ''}>${i + 1} курс</option>`).join('')}</select></label>`;
+    }
+    function readIdentity(pre, p) {
+        const sp = val(`${pre}-species`);
+        p.species = sp === '__other' ? val(`${pre}-species-t`) : sp;
+        const ab = val(`${pre}-abil`);
+        if (ab === '__other') { p.abilities = val(`${pre}-abil-t`); p.abilityVisible = !!document.getElementById(`${pre}-abil-v`)?.checked; }
+        else { p.abilities = ab; p.abilityVisible = !!ABILITIES.find((a) => a.n === ab)?.v; }
+        p.year = clamp(parseInt(val(`${pre}-year`), 10) || 1, 1, MAX_YEAR);
+    }
     function readAuth(s) {
         const p = s.profile;
         p.name = val('sh-a-name') || p.name;
-        p.species = val('sh-a-species');
-        p.abilities = val('sh-a-abil');
-        p.year = clamp(parseInt(val('sh-a-year'), 10) || 1, 1, 6);
+        readIdentity('sh-a', p);
     }
 
     /* — лента — */
@@ -840,11 +896,10 @@
         const p = s.profile, pr = p.privacy;
         const tog = (k, l) => `<label class="sh-toggle"><input type="checkbox" data-change="privacy" data-k="${k}" ${pr[k] ? 'checked' : ''}><span>${l}</span></label>`;
         return `${head('Профиль')}
-        <div class="sh-idcard">${ava(p.name, true)}<div><b>${esc(p.name)}</b><small>${pr.faculty ? esc(p.faculty) : 'факультет скрыт'}</small>${pr.species ? badge(p.species || 'вид не указан') : badge('вид скрыт')}</div></div>
+        <div class="sh-idcard">${ava(p.name, true)}<div><b>${esc(p.name)}</b><small>${pr.faculty ? esc(p.faculty) : 'факультет скрыт'}, ${p.year} курс</small>${pr.abilities && p.abilities ? badge(p.abilities === NO_ABIL ? 'без способностей' : p.abilities) : ''}${pr.species ? badge(p.species || 'вид не указан') : badge('вид скрыт')}</div></div>
         <div class="sh-card sh-form">
           <label>Имя<input id="sh-pf-name" value="${esc(p.name)}"></label>
-          <label>Вид<input id="sh-pf-species" value="${esc(p.species)}"></label>
-          <label>Способности<input id="sh-pf-abil" value="${esc(p.abilities)}"></label>
+          ${identityFields('sh-pf', p)}
           <label>О себе<textarea id="sh-pf-bio" rows="3">${esc(p.bio)}</textarea></label>
           <button class="sh-btn" data-act="saveProfile">Сохранить профиль</button>
         </div>
@@ -873,7 +928,7 @@
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.1.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.2.1 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -959,7 +1014,7 @@
             : th.kind === 'char'
                 ? `${th.name} — персонажа текущей истории. Сохраняй его характер и манеру речи из описания.`
                 : `${th.name}${th.species ? ` (вид: ${th.species})` : ''}${th.bio ? `. О себе: ${th.bio}` : ''}`;
-        let r = await aiText(`${world(s)}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist}\n\nНапиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски.`);
+        let r = await aiText(`${world(s)}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist}\n\nНапиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении.`);
         th.typing = false;
         if (S() !== s) return;
         if (r) {
@@ -1000,6 +1055,8 @@
             readAuth(s);
             const fac = val('sh-a-fac') || s.profile.faculty;
             if (!s.profile.name) return toast('warning', 'Укажите имя студента.');
+            if (!s.profile.species) return toast('warning', 'Выберите вид.');
+            if (!s.profile.abilities) return toast('warning', 'Выберите способность или «Отсутствуют».');
             if (!fac) return toast('warning', 'Выберите факультет или впишите свой.');
             s.profile.faculty = fac;
             return withBusy('Составляю расписание…', async () => {
@@ -1025,7 +1082,7 @@
         },
         like: (d, el, s) => { const p = s.feed.find((x) => x.id === d.id); if (!p) return; p.liked = !p.liked; p.likes = Math.max(0, (p.likes || 0) + (p.liked ? 1 : -1)); save(s); render(); },
         genFeed: (d, el, s) => withBusy('Загружаю ленту…', async () => {
-            const r = await aiJSON(`${world(s)}\n\nСгенерируй 6 свежих публикаций в ленту UniHub от разных студентов разных видов. Можно упоминать ${ctx().name2} и события мира. Каналы: general, study, clubs, dorms, species (пост внутри сообщества своего вида).${s.profile.species ? ` Минимум 1 пост от вида «${s.profile.species}» в канал species.` : ''}\nФормат: [{"author":"Имя Фамилия","species":"вид","channel":"general","text":"до 300 символов, живой стиль соцсети","media":"краткое описание фото/видео или пустая строка","kind":"photo|video|reel|story","likes":12,"verified":true}]`);
+            const r = await aiJSON(`${world(s)}\n\nСгенерируй 6 свежих публикаций в ленту UniHub от разных студентов разных видов. Можно упоминать ${ctx().name2} и события мира. Каналы: general, study, clubs, dorms, species (пост внутри сообщества своего вида).${s.profile.species ? ` Минимум 1 пост от вида «${s.profile.species}» в канал species.` : ''} 1–2 поста могут обсуждать ${s.profile.name}: реакцию на вид и способности по правилам выше.\nФормат: [{"author":"Имя Фамилия","species":"вид","channel":"general","text":"до 300 символов, живой стиль соцсети","media":"краткое описание фото/видео или пустая строка","kind":"photo|video|reel|story","likes":12,"verified":true}]`);
             if (!Array.isArray(r) || !r.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
             const now = Date.now();
             const posts = r.filter((p) => p && p.author && p.text).map((p, i) => ({ id: uid(), author: String(p.author).slice(0, 50), species: String(p.species || '').slice(0, 40), channel: CHANNELS[p.channel] && p.channel !== 'all' ? p.channel : 'general', text: String(p.text).slice(0, 600), media: String(p.media || '').slice(0, 200), kind: p.kind, likes: Math.max(0, parseInt(p.likes, 10) || 0), verified: p.verified !== false, t: now - i * 7 * MIN }));
@@ -1302,7 +1359,7 @@
 
         saveProfile: (d, el, s) => {
             const p = s.profile;
-            p.name = val('sh-pf-name') || p.name; p.species = val('sh-pf-species'); p.abilities = val('sh-pf-abil'); p.bio = val('sh-pf-bio');
+            p.name = val('sh-pf-name') || p.name; readIdentity('sh-pf', p); p.bio = val('sh-pf-bio');
             toast('success', 'Профиль сохранён.');
             save(s); render();
         },
@@ -1346,6 +1403,11 @@
         const el = e.target;
         const s = S();
         const k = el.dataset?.k;
+        if (el.dataset.change === 'idSel') {
+            const box = document.getElementById(el.dataset.other);
+            if (box) box.style.display = el.value === '__other' ? '' : 'none';
+            return;
+        }
         if (el.dataset.change === 'privacy' && s) { s.profile.privacy[k] = el.checked; save(s); render(); }
         else if (el.dataset.change === 'cfg') { const n = Number(el.value); if (Number.isFinite(n)) { cfg()[k] = n; saveCfg(); updateInjection(); } }
         else if (el.dataset.change === 'cfgBool') { cfg()[k] = el.checked; saveCfg(); updateInjection(); updateFab(); }
@@ -1360,11 +1422,34 @@
 
     /* ───────────────────────── монтирование ───────────────────────── */
 
+    // системная кнопка «Назад» на Android: сначала возвращает из подэкрана, затем закрывает приложение
+    let skipPop = false;
     function toggle(force) {
-        ui.open = typeof force === 'boolean' ? force : !ui.open;
+        const want = typeof force === 'boolean' ? force : !ui.open;
+        if (want === ui.open) { if (want) render(); return; }
+        ui.open = want;
         document.getElementById('sh-phone')?.classList.toggle('open', ui.open);
-        if (ui.open) { lastKey = ''; render(); }
+        document.getElementById('sh-fab')?.classList.toggle('hidden', ui.open);
+        if (ui.open) {
+            lastKey = ''; render();
+            try { history.pushState({ unihub: true }, ''); } catch { /* нет history */ }
+        } else if (history.state?.unihub) {
+            skipPop = true;
+            history.back();
+        }
     }
+    window.addEventListener('popstate', () => {
+        if (skipPop) { skipPop = false; return; }
+        if (!ui.open) return;
+        if (ui.view) {
+            ui.view = null; ui.param = null; render();
+            try { history.pushState({ unihub: true }, ''); } catch { /* нет history */ }
+        } else {
+            ui.open = false;
+            document.getElementById('sh-phone')?.classList.remove('open');
+            document.getElementById('sh-fab')?.classList.remove('hidden');
+        }
+    });
 
     function mount() {
         if (document.getElementById('sh-phone')) return;
