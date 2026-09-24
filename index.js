@@ -526,6 +526,11 @@
         }
         const so = soc(s);
         if (refreshQuests(s)) ch = true;
+        for (const q of so.quests) if (q.hook && q.hookAt && now >= q.hookAt) { fireHook(s, q, q.hookDetail); ch = true; }
+        if (s.pendingDMs?.length) {
+            const due = s.pendingDMs.filter((x) => now >= x.at);
+            for (const pd of due) if (startDM(s, pd)) { s.pendingDMs = s.pendingDMs.filter((x) => x !== pd); ch = true; }
+        }
         if (tickMeetings(s, now)) ch = true;
         if (so.hate > 0) so.hate = Math.max(0, so.hate - 0.05);
         if (so.cancelledUntil && now >= so.cancelledUntil) { so.cancelledUntil = 0; so.hate = Math.min(so.hate, 40); ch = true; notify(s, '🌤️ Волна хейта утихла — вас больше не «отменяют».', 'important'); }
@@ -646,7 +651,49 @@
             id: uid(), k, t: cleanMsg(q.title || 'Задание').slice(0, 60), desc: cleanMsg(q.desc || '').slice(0, 260),
             n: clamp(parseInt(q.n, 10) || 1, 1, k === 'rp' ? 1 : 8), p: 0, done: false, param: k === 'grade5' ? q.param : '',
             r: { authority: clamp(parseInt(q.authority, 10) || 2, 1, 6), money: clamp(parseInt(q.money, 10) || 0, 0, 300) },
+            hook: q.hook && typeof q.hook === 'object' ? q.hook : null, setup: '',
+            trigger: TRIGGERS[q.trigger] ? q.trigger : (TRIGGERS[k] ? k : 'post'),
         };
+    }
+    const TRIGGERS = { now: 'сразу', post: 'публикация поста', comment: 'комментарий', reply: 'ответ на комментарий', dm: 'сообщение в личке', like: 'лайк', follow: 'подписка', checkin: 'отметка на паре', homework: 'сдача задания', order: 'заказ доставки', buy: 'покупка на маркете', meet: 'договорённость о встрече' };
+    /** Зацепка срабатывает в ответ на действие пользователя: ИИ пишет отклик с учётом того, что он(а) сделал(а). */
+    function fireHook(s, q, detail) {
+        const h = q.hook;
+        q.hook = null;
+        if (!h) return;
+        const act = TRIGGERS[q.trigger] || 'действие';
+        if (h.type === 'story') {
+            q.setup = cleanMsg(h.event || h.intent || '').slice(0, 300);
+            if (q.trigger !== 'now') notify(s, `✨ Кажется, ваше действие запустило что-то в истории…`, 'social');
+            return;
+        }
+        enqueue(s, async () => {
+            const who = cleanName(h.from || h.author) || 'Аноним';
+            const sp = String(h.species || '').slice(0, 40);
+            const base = `${world(s)}\n\nЗадание ${s.profile.name}: «${q.t}» — ${q.desc}\nЗамысел продолжения: ${h.intent || h.text || ''}\nПоводом стало действие ${s.profile.name}: ${act}${detail ? ` — «${String(detail).slice(0, 300)}»` : ''}.`;
+            if (h.type === 'dm') {
+                const txt = await aiText(`${base}\n\nТеперь ${who}${sp ? ` (${sp})` : ''} пишет ${s.profile.name} в личку UniHub, откликаясь именно на это действие. Напиши первое сообщение: 1–3 предложения, живо, по-русски, только текст.`);
+                if (!txt) return;
+                let th = s.threads.find((t) => t.name.toLowerCase() === who.toLowerCase());
+                if (!th) { th = { id: uid(), name: who, species: sp, bio: String(h.intent || '').slice(0, 200), kind: 'dm', msgs: [], t: Date.now(), unread: 0, rel: 0 }; s.threads.unshift(th); }
+                th.msgs.push({ me: false, text: cleanMsg(txt).slice(0, 500), t: Date.now() });
+                th.unread = (th.unread || 0) + 1; th.t = Date.now();
+                notify(s, `💬 ${who}: ${cleanMsg(txt).slice(0, 70)}`, 'important');
+            } else if (h.type === 'post') {
+                const txt = await aiText(`${base}\n\nТеперь ${who}${sp ? ` (${sp})` : ''} публикует пост в ленте UniHub, откликаясь на это. До 280 символов, живо, по-русски, только текст поста.`);
+                if (!txt) return;
+                s.feed.unshift({ id: uid(), author: who, species: sp, channel: 'general', text: cleanMsg(txt).slice(0, 500), likes: 5 + Math.floor(Math.random() * 60), t: Date.now(), comments: [] });
+                notify(s, `📰 ${who} опубликовал(а) пост — кажется, это про вас`, 'important');
+            }
+        });
+    }
+    /** Проверяет, не запускает ли действие пользователя чью-то зацепку. Отклик приходит через 1–3 минуты. */
+    function armHooks(s, k, detail) {
+        for (const q of soc(s).quests) {
+            if (!q.hook || q.hookAt || q.trigger !== k) continue;
+            q.hookAt = Date.now() + (60 + Math.floor(Math.random() * 120)) * 1000;
+            q.hookDetail = String(detail || '').slice(0, 300);
+        }
     }
     /** Новые задания раз в день: генерирует ИИ, без повторов. */
     function refreshQuests(s) {
@@ -659,22 +706,33 @@
         enqueue(s, async () => {
             const weak = weakSubjects(s);
             const past = so.questHistory.slice(-40);
-            const story = recentStory(8);
+            const story = recentStory(8), scene = currentScene();
+            const dms = s.threads.filter((t) => t.msgs.length).slice(0, 6).map((t) => `${t.name}: «${(t.msgs[t.msgs.length - 1].text || '').slice(0, 80)}»`).join('; ');
+            const plots = s.stories.slice(-4).map((x) => `«${x.title}»: ${x.summary}`).join('; ');
             const r = await aiJSON(`${world(s)}\n\nПридумай 3 задания дня для ${s.profile.name} в приложении UniHub (${s.profile.faculty}, ${s.profile.year} курс).
 Типы (поле "k"):
 ${Object.entries(QUEST_KINDS).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
 Правила:
 - Минимум одно задание типа rp: конкретное дело в основной истории — бытовое, социальное, учебное или приключенческое (вынести мусор, навести порядок в комнате, вернуть книгу, помочь соседу, достать ингредиент для зелья, разузнать слух, помириться с кем-то…). Оно должно двигать сюжет и быть связано с миром, персонажами и текущими событиями.
 - Задания из разных сфер, живые и конкретные, с юмором или интригой; у каждого короткое яркое название.
+- ОПИРАЙСЯ ТОЛЬКО НА ФАКТЫ ниже. Нельзя описывать как уже случившееся то, чего нет: чью-то панику, аварию, чужую просьбу, сообщение в личке, пост в ленте. Нельзя противоречить текущему моменту истории — где находятся персонажи и что делают.
+- Задание типа rp — то, что ${s.profile.name} может сделать сам(а) по своей инициативе (убраться, вернуть книгу, приготовить сюрприз, помириться, разузнать).
+- Для интриги можно добавить зацепку hook — продолжение, которое наступит ТОЛЬКО В ОТВЕТ на действие ${s.profile.name}. Укажи trigger — какое действие её запускает: ${Object.entries(TRIGGERS).filter(([k]) => k !== 'now').map(([k, v]) => `${k} (${v})`).join(', ')}. Виды зацепок: {"type":"dm","from":"имя или Аноним","species":"вид","intent":"кто это и чего хочет"} — этот студент напишет в личку, откликнувшись на действие; {"type":"post","from":"имя","species":"вид","intent":"о чём пост"} — появится пост-отклик в ленте; {"type":"story","event":"что произойдёт в сюжете"} — рассказчик введёт событие в основную историю (для story можно trigger "now").
+- Описание задания начинай с действия ${s.profile.name}, а продолжение подавай как возможность, без спойлеров и гарантий: «Опубликуй пост о пропавшем амулете — вдруг кто-то что-то знает», а НЕ «Тебе написал аноним».
+- Для отслеживаемых типов (не rp) описание требует ровно само действие и число раз, без условий, которые нельзя проверить (вид автора, тема комментария и т.п.).
 - ${weak.length ? `Слабые предметы (для grade5): ${weak.join(', ')}.` : 'Слабых предметов нет — не давай grade5.'}
 - НЕ повторяй и не перефразируй прошлые задания: ${past.length ? past.join('; ') : 'их пока нет'}.
-${story ? `Последние события истории:\n${story}\n` : ''}Формат: [{"k":"rp","title":"название","desc":"что сделать и чем это обернётся, 1–2 предложения","n":1,"param":"","authority":2,"money":50}] — n: сколько раз (для rp всегда 1), authority 1–6, money 0–300.`);
+ФАКТЫ:
+${scene ? `Текущий момент истории: ${scene}\n` : ''}${story ? `Последние события истории:\n${story}\n` : 'Истории пока нет.\n'}Переписки в UniHub: ${dms || 'нет'}.
+Сюжеты ленты: ${plots || 'нет'}.
+Формат: [{"k":"rp","title":"название","desc":"что сделать, 1–2 предложения","n":1,"param":"","authority":2,"money":50,"trigger":"post","hook":null}] — n: сколько раз (для rp всегда 1), authority 1–6, money 0–300; trigger нужен только вместе с hook.`);
             let list = (Array.isArray(r) ? r : []).map((q) => q && makeQuest(q, s)).filter(Boolean).slice(0, 3);
             if (!list.some((q) => q.k === 'rp') || list.length < 3) {
                 const pool = FALLBACK_QUESTS.filter((f) => !past.includes(f.title) && !list.some((q) => q.t === f.title));
                 while (list.length < 3 && pool.length) list.push(makeQuest(pool.splice(Math.floor(Math.random() * pool.length), 1)[0], s));
             }
             if (so.hate >= 40) list.push({ id: uid(), k: 'redeem', t: 'Вернуть доверие', desc: 'Опубликуй пост, который сообщество примет хорошо.', n: 1, p: 0, done: false, r: { authority: 3, money: 0 } });
+            for (const q of list) if (q.hook && q.trigger === 'now') fireHook(s, q, '');
             so.quests = list;
             so.questHistory.push(...list.map((q) => q.t));
             if (so.questHistory.length > 80) so.questHistory = so.questHistory.slice(-80);
@@ -695,7 +753,8 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
         const after = levelOf(so);
         if (after > before) { so.level = after; notify(s, `⬆️ Уровень UniHub ${after}!${PERKS[after] ? ` Открыто: ${PERKS[after]}.` : ''}`, 'important'); }
     }
-    function questEvent(s, k, amt = 1, param = '') {
+    function questEvent(s, k, amt = 1, param = '', detail = '') {
+        armHooks(s, k, detail);
         for (const q of soc(s).quests) {
             if (q.k !== k || q.done || (q.param && q.param !== param)) continue;
             q.p = Math.min(q.n, q.p + amt);
@@ -881,6 +940,8 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
         const rpq = so.quests.filter((q) => q.k === 'rp');
         const openQ = rpq.filter((q) => !q.done), doneQ = rpq.filter((q) => q.done && nowT - q.doneAt < 12 * HOUR);
         if (openQ.length) L.push(`Задания дня ${p.name} в UniHub: ${openQ.map((q) => `«${q.t}» — ${q.desc}`).join('; ')}. Можешь естественно создавать в истории поводы и ситуации, связанные с ними; не выполняй их за ${p.name}.`);
+        const setups = openQ.filter((q) => q.setup);
+        if (setups.length) L.push(`Предстоящие события (введи их в историю естественно, когда это уместно и не ломает текущую сцену; не всё сразу): ${setups.map((q) => q.setup).join('; ')}.`);
         if (doneQ.length) L.push(`${p.name} недавно выполнил(а): ${doneQ.map((q) => `«${q.t}»`).join(', ')}. Последствия этого могут проявиться в истории (кто-то заметил, поблагодарил, что-то изменилось).`);
         const ctj = s.threads.find((t) => t.kind === 'char');
         for (const j of s.jealousy.filter((x) => nowT - x.t < 3 * DAY).slice(-2)) if (ctj) L.push(`${ctj.name} узнал(а), что ${p.name} ходил(а) на свидание с ${j.with} (${j.how}). Отношения ухудшились — ${ctj.name} реагирует в характере: ревность, обида, холодность или выяснение отношений.`);
@@ -1091,7 +1152,7 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
     function questHTML(q) {
         const rw = [q.r.authority ? `⭐ +${q.r.authority}` : '', q.r.money ? money(q.r.money) : ''].filter(Boolean).join(' · ');
         return `<div class="sh-quest ${q.done ? 'done' : ''}"><i class="fa-solid ${q.done ? 'fa-circle-check' : q.k === 'rp' ? 'fa-book-open' : 'fa-mobile-screen'}"></i>
-          <div><b>${esc(q.t)}</b>${q.desc ? `<p>${esc(q.desc)}</p>` : ''}<small>${q.k === 'rp' ? 'в истории' : `${q.p}/${q.n}`}${rw ? ` · ${rw}` : ''}</small>
+          <div><b>${esc(q.t)}</b>${q.desc ? `<p>${esc(q.desc)}</p>` : ''}${q.setup && !q.done ? '<small><i class="fa-solid fa-hourglass-half"></i> событие ещё должно случиться в истории</small>' : ''}<small>${q.k === 'rp' ? 'в истории' : `${q.p}/${q.n}`}${rw ? ` · ${rw}` : ''}</small>
           ${q.k === 'rp' && !q.done ? `<button class="sh-btn sm ghost" data-act="checkQuest" data-id="${q.id}"><i class="fa-solid fa-magnifying-glass"></i> Проверить по истории</button>` : ''}</div></div>`;
     }
     function statsBlock(s) {
@@ -1105,7 +1166,8 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
           <small>Хейт: ${hate}%${hate >= 50 ? ' — осторожно, при 70% вас «отменят»' : ''}</small><div class="sh-bar"><span class="${hate >= 50 ? 'bad' : hate >= 25 ? 'warn' : ''}" style="width:${hate}%"></span></div>
           ${PERKS[lv + 1] ? `<small>На уровне ${lv + 1}: ${PERKS[lv + 1]}</small>` : ''}
         </div>
-        <div class="sh-card"><h4>Задания дня</h4>${so.questsLoading && !so.quests.length ? '<p class="sh-muted"><i class="fa-solid fa-spinner fa-spin"></i> Придумываю задания…</p>' : so.quests.length ? so.quests.map((q) => questHTML(q)).join('') : '<p class="sh-muted">Задания появятся в течение минуты.</p>'}</div>`;
+        <div class="sh-card"><h4>Задания дня</h4>${so.questsLoading && !so.quests.length ? '<p class="sh-muted"><i class="fa-solid fa-spinner fa-spin"></i> Придумываю задания…</p>' : so.quests.length ? so.quests.map((q) => questHTML(q)).join('') : '<p class="sh-muted">Задания появятся в течение минуты.</p>'}
+          ${so.rerollDay !== dkey(Date.now()) && so.quests.length ? '<button class="sh-link" data-act="rerollQuests"><i class="fa-solid fa-rotate"></i> Заменить задания (раз в день)</button>' : ''}</div>`;
     }
     function meView(s) {
         const posts = s.feed.filter((p) => p.mine);
@@ -1430,7 +1492,7 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.7.2 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.8.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -1527,7 +1589,7 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
         else th.pendingMeet.problem = meetProblem(s, at, place);
         if (!(ui.open && ui.view === 'thread' && ui.param === th.id)) notify(s, `🤝 Похоже, вы договорились с ${th.name} о встрече ${fmtWhen(at)}. Подтвердите в чате.`, 'important');
     }
-    async function reply(s, th) {
+    async function reply(s, th, opts = {}) {
         th.typing = true; render();
         const hist = th.msgs.filter((m) => !m.sys).slice(-14).map((m) => `${m.me ? s.profile.name : (m.from || th.name)}: ${m.text}`).join('\n');
         let extra = '';
@@ -1543,7 +1605,7 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
                 ? `${th.name} — персонажа текущей истории. Строго сохраняй его характер, отношение к ${s.profile.name}, манеру речи и словечки из карточки и примеров; учитывай события истории. Пиши так, как этот персонаж писал бы в мессенджере.`
                 : `${th.name}${th.species ? ` (вид: ${th.species})` : ''}${th.bio ? `. О себе: ${th.bio}` : ''}`;
         const relTxt = th.kind === 'group' ? '' : `\nОтношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100, шкала от −100 вражда до 100 близость).${th.kind === 'char' && s.profile.relWithChar ? ` ${th.name} и ${s.profile.name} — пара.` : ''}${jealousNote(s, th)}`;
-        const raw = await aiRaw(`${world(s)}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist}\n\nНапиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date().toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(Date.now())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
+        const raw = await aiRaw(`${world(s)}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist || '(переписки ещё не было)'}\n\n${opts.initiate ? `${opts.initiate}\n\n` : ''}Напиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date().toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(Date.now())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
         th.typing = false;
         if (S() !== s) return;
         const js = th.kind === 'group' ? null : parseJSON(raw);
@@ -1573,21 +1635,47 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
             st ? `Пост — часть сюжетной линии «${st.title}» (участники: ${st.cast.join(', ')}): ${st.summary}` : '',
             p.mine && cancelled(s) ? `Сейчас ${s.profile.name} «отменяют» в сети: большинство комментаторов настроены враждебно, лишь пара человек заступается.` : '',
         ].filter(Boolean).join('\n');
-        const scoreFmt = scoreWhat ? `\nТакже оцени ${scoreWhat} ${s.profile.name}: authority (−5…5 — насколько это подняло авторитет ${s.profile.name}: остроумие, смелость, поддержка, интересная мысль — плюс; грубость, кринж, глупость — минус), controversy (0…10 — насколько спорно или токсично), sentiment (positive, mixed или negative — как восприняло сообщество). Реакция комментаторов должна соответствовать оценке.` : '';
-        const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${p.text}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"}}' : ''}`);
+        const scoreFmt = scoreWhat ? `\nТакже оцени ${scoreWhat} ${s.profile.name}: authority (−5…5 — насколько это подняло авторитет ${s.profile.name}: остроумие, смелость, поддержка, интересная мысль — плюс; грубость, кринж, глупость — минус), controversy (0…10 — насколько спорно или токсично), sentiment (positive, mixed или negative — как восприняло сообщество). Реакция комментаторов должна соответствовать оценке.\nЕсли кто-то из комментаторов пообещал написать ${s.profile.name} в личку, начал договариваться с ней/ним о встрече или явно хочет продолжить разговор наедине — заполни followup: {"from":"имя этого комментатора","is_char":true если это ${ctx().name2} — персонаж основной истории, иначе false,"intent":"что он(а) напишет в личке — например, уточнит день, время и место встречи"}. Иначе followup: null.` : '';
+        const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${p.text}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
         const arr = Array.isArray(r) ? r : (Array.isArray(r?.comments) ? r.comments : []);
         const list = arr.filter((c) => c && c.author && c.text && cleanName(c.author) !== s.profile.name).slice(0, 8).map((c) => ({
             id: uid(), author: cleanName(c.author), species: String(c.species || '').slice(0, 40), text: cleanMsg(c.text).slice(0, 400),
             replyTo: cleanName(c.replyTo), likes: Math.max(0, parseInt(c.likes, 10) || 0), liked: false,
         }));
         list.score = r && !Array.isArray(r) ? r.score : null;
+        list.followup = r && !Array.isArray(r) && r.followup && typeof r.followup === 'object' && r.followup.from ? r.followup : null;
         return list;
+    }
+    /** Кто-то из ленты решил написать в личку — сообщение придёт через 1–2,5 минуты. */
+    function scheduleDM(s, fu, species, context) {
+        const from = cleanName(fu.from);
+        if (!from || from === s.profile.name) return;
+        s.pendingDMs ||= [];
+        const isChar = fu.is_char === true || fu.is_char === 'true';
+        if (s.pendingDMs.some((x) => x.from === from || (isChar && x.isChar))) return;
+        s.pendingDMs.push({ id: uid(), at: Date.now() + (60 + Math.floor(Math.random() * 90)) * 1000, from, species: species || '', isChar, intent: cleanMsg(fu.intent || '').slice(0, 300), context: String(context || '').slice(0, 900) });
+    }
+    function startDM(s, pd) {
+        let th;
+        if (pd.isChar) {
+            th = s.threads.find((t) => t.kind === 'char');
+            const c = ctx();
+            if (!th && c.name2 && !c.groupId) { th = { id: uid(), name: c.name2, species: '', bio: '', kind: 'char', msgs: [], t: Date.now(), unread: 0, rel: 40 }; s.threads.push(th); }
+        }
+        if (!th) {
+            th = s.threads.find((t) => t.name.toLowerCase() === pd.from.toLowerCase());
+            if (!th) { th = { id: uid(), name: pd.from, species: pd.species, bio: '', kind: 'dm', msgs: [], t: Date.now(), unread: 0, rel: 10 }; s.threads.unshift(th); }
+        }
+        if (th.typing) return false;
+        reply(s, th, { initiate: `${th.name} сам(а) пишет ${s.profile.name} первым(ой) в личку — продолжение разговора в комментариях ленты:\n${pd.context}\nЦель сообщения: ${pd.intent || 'продолжить разговор наедине'}. Если в комментариях договаривались встретиться — предложи или уточни конкретные день, время и место.` });
+        return true;
     }
     /** Реакция аудитории на пост пользователя: комментарии приходят постепенно, растут лайки и подписчики. */
     function engageMyPost(s, p) {
         enqueue(s, async () => {
             const list = await aiComments(s, p, 'Сгенерируй 5–7 комментариев от разных студентов, которые увидели этот пост. Иногда они отвечают друг другу (replyTo).', 'этот пост');
             applyScore(s, list.score, p);
+            if (list.followup) scheduleDM(s, list.followup, list.find((c) => c.author === cleanName(list.followup.from))?.species, `Пост ${s.profile.name}: «${p.text.slice(0, 200)}»\n${list.map((c) => `${c.author}: ${c.text}`).join('\n')}`);
             const now = Date.now();
             let at = now;
             for (const c of list) { at += (40 + Math.floor(Math.random() * 90)) * 1000; p.comments.push({ ...c, t: at, at }); }
@@ -1645,7 +1733,7 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
             s.feed.unshift(p);
             byId('sh-post').value = '';
             save(s); render();
-            questEvent(s, 'post');
+            questEvent(s, 'post', 1, '', text);
             engageMyPost(s, p);
         },
         genComments: async (d, el, s) => {
@@ -1673,8 +1761,9 @@ ${story ? `Последние события истории:\n${story}\n` : ''}�
             const list = await aiComments(s, p, `${s.profile.name} только что написал(а) комментарий${replyTo ? ` в ответ ${replyTo}` : ''}: «${text}». Сгенерируй 1–3 ответа в ветке. ${target ? `${target} обязательно отвечает ${s.profile.name} (replyTo: "${s.profile.name}"). ` : 'Ответь от лица других студентов. '}Может подключиться ещё кто-то из комментаторов или новый студент.`, 'этот комментарий');
             p.loadingComments = false;
             applyScore(s, list.score, null);
-            questEvent(s, 'comment');
-            if (replyTo) questEvent(s, 'reply');
+            if (list.followup) scheduleDM(s, list.followup, list.find((c) => c.author === cleanName(list.followup.from))?.species, `Пост ${p.author}: «${p.text.slice(0, 200)}»\n${shownComments(p).slice(-6).map((c) => `${c.author}: ${c.text}`).join('\n')}\n${list.map((c) => `${c.author}: ${c.text}`).join('\n')}`);
+            questEvent(s, 'comment', 1, '', text);
+            if (replyTo) questEvent(s, 'reply', 1, '', text);
             const st = p.story ? s.stories.find((x) => x.title === p.story) : null;
             if (st) { (st.userActs ||= []).push(text.slice(0, 160)); if (st.userActs.length > 5) st.userActs.shift(); questEvent(s, 'story'); }
             if (S() !== s) return;
@@ -1780,13 +1869,23 @@ ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species}
             toast('info', 'Начало сцены вставлено в поле ввода чата.');
             toggle(false);
         },
+        rerollQuests: (d, el, s) => {
+            const so = soc(s), day = dkey(Date.now());
+            if (so.rerollDay === day) return toast('info', 'Задания уже обновлялись сегодня. Новые появятся завтра.');
+            if (!confirm('Заменить задания дня на новые? Сделать это можно раз в день.')) return;
+            so.rerollDay = day;
+            so.questDay = '';
+            so.quests = [];
+            refreshQuests(s);
+            save(s); render();
+        },
         checkQuest: (d, el, s) => {
             const q = soc(s).quests.find((x) => x.id === d.id);
             if (!q || q.done) return;
             const story = recentStory(25);
             if (!story) return toast('warning', 'В основной истории пока нет сообщений.');
             return withBusy('Проверяю историю…', async () => {
-                const r = await aiJSON(`Задание для ${s.profile.name}: «${q.t}» — ${q.desc}
+                const r = await aiJSON(`Задание для ${s.profile.name}: «${q.t}» — ${q.desc}${q.setup ? ` (Задание связано с событием: ${q.setup}. Если этого события в истории ещё не было — не засчитывай и так и скажи.)` : ''}
 
 Последние сообщения основной истории:
 ${story}
@@ -1848,7 +1947,7 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
             if (!th || !text || th.typing) return;
             th.msgs.push({ me: true, text, t: Date.now() }); th.t = Date.now();
             byId('sh-msg').value = '';
-            questEvent(s, 'dm');
+            questEvent(s, 'dm', 1, '', `${th.name}: ${text}`);
             save(s);
             return reply(s, th);
         },
