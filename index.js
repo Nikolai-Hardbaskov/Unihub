@@ -33,6 +33,10 @@
         inject: true,
         injectDepth: 2,
         shareDMs: true,         // передавать переписку UniHub в основной чат
+        timeMode: 'game',       // для новых чатов: game — часы истории, real — реальное время
+        syncHorae: true,        // брать время из расширения Horae, если найдено
+        syncAI: true,           // ИИ определяет прошедшее время по тексту ответа
+        stepMin: 10,            // иначе — столько минут за каждый ответ истории
         chatContext: 10,        // сколько последних сообщений истории видит персонаж в UniHub
         quarterDays: 30,        // длина четверти в реальных днях
         maxStrikes: 10,         // нарушений до отчисления
@@ -77,8 +81,8 @@
     }
     const val = (id) => (byId(id)?.value ?? '').trim();
 
-    function left(ts) {
-        const d = ts - Date.now();
+    function left(ts, base) {
+        const d = ts - (base ?? NOW());
         if (d <= 0) return 'срок истёк';
         const m = Math.floor(d / MIN);
         if (m < 60) return `${m} мин`;
@@ -254,7 +258,7 @@
         return out.sort((a, b) => a.start - b.start);
     }
     function curNext(s) {
-        const now = Date.now();
+        const now = NOW();
         const occ = occurrences(s, now - 4 * HOUR, now + 8 * DAY);
         return { cur: occ.find((o) => o.start <= now && o.end > now), next: occ.find((o) => o.start > now) };
     }
@@ -478,7 +482,7 @@
 
     function issueTask(s, o) {
         const c = cfg();
-        const now = Date.now();
+        const now = NOW();
         const nx = occurrences(s, o.end + MIN, o.end + 15 * DAY).find((x) => x.cl.subject === o.cl.subject && x.start > o.end);
         let deadline = nx ? nx.start - c.deadlineOffsetMin * MIN : o.end + 3 * DAY;
         deadline = Math.max(deadline, o.end + HOUR, now + HOUR);
@@ -497,7 +501,7 @@
 
     function addStrike(s, reason, taskId = null) {
         if (s.expelled) return;
-        const k = { id: uid(), reason, taskId, t: Date.now(), q: s.quarter.n, fixed: false, consequence: '' };
+        const k = { id: uid(), reason, taskId, t: NOW(), q: s.quarter.n, fixed: false, consequence: '' };
         s.strikes.push(k);
         const n = activeStrikes(s).length, max = cfg().maxStrikes;
         notify(s, `⚠️ Нарушение ${n}/${max}: ${reason}. Рейтинг: ${rating(s)}%.`, 'warn');
@@ -512,7 +516,7 @@
     function tick() {
         const s = S();
         if (!s || !s.auth) return;
-        const c = cfg(), now = Date.now();
+        const c = cfg(), now = Date.now(), gnow = NOW();
         let ch = false;
 
         for (const o of s.orders) if (!o.notified && now >= o.eta) {
@@ -531,7 +535,7 @@
             const due = s.pendingDMs.filter((x) => now >= x.at);
             for (const pd of due) if (startDM(s, pd)) { s.pendingDMs = s.pendingDMs.filter((x) => x !== pd); ch = true; }
         }
-        if (tickMeetings(s, now)) ch = true;
+        if (tickMeetings(s, gnow)) ch = true;
         if (so.hate > 0) so.hate = Math.max(0, so.hate - 0.05);
         if (so.cancelledUntil && now >= so.cancelledUntil) { so.cancelledUntil = 0; so.hate = Math.min(so.hate, 40); ch = true; notify(s, '🌤️ Волна хейта утихла — вас больше не «отменяют».', 'important'); }
         if (cancelled(s)) so.followers = Math.max(0, so.followers - Math.floor(so.followers * 0.001));
@@ -554,21 +558,21 @@
                 }
             }
         }
-        if (now - s.wallet.lastStipend >= 7 * DAY) {
-            s.wallet.lastStipend = now; ch = true;
+        if (gnow - s.wallet.lastStipend >= 7 * DAY) {
+            s.wallet.lastStipend = gnow; ch = true;
             const g = gpa(s);
             if (!s.expelled && g !== null && g >= c.stipendMinGpa) { tx(s, c.stipend, 'Стипендия'); notify(s, `🎓 Начислена стипендия ${money(c.stipend)}.`); }
         }
 
-        if (!s.expelled && !s.pausedAt) {
-            if (now - s.quarter.start >= c.quarterDays * DAY) {
-                s.quarter = { n: s.quarter.n + 1, start: now }; ch = true;
+        if (!s.expelled && !(s.pausedAt && !gameMode(s))) {
+            if (gnow - s.quarter.start >= c.quarterDays * DAY) {
+                s.quarter = { n: s.quarter.n + 1, start: gnow }; ch = true;
                 notify(s, `📅 Началась ${s.quarter.n}-я четверть. Счётчик нарушений обнулён.`, 'important');
             }
             // посещаемость и выдача домашних заданий
-            for (const o of occurrences(s, Math.max(s.enforceFrom, now - 14 * DAY), now)) {
+            for (const o of occurrences(s, Math.max(s.enforceFrom, gnow - 14 * DAY), gnow)) {
                 if (s.expelled) break;
-                if (o.start < s.enforceFrom || o.end > now || inPause(s, o.start)) continue;
+                if (o.start < s.enforceFrom || o.end > gnow || inPause(s, o.start)) continue;
                 if (!s.attendance[o.key]) {
                     s.attendance[o.key] = 'absent'; ch = true;
                     addStrike(s, `прогул без уважительной причины — ${o.cl.subject}, ${fmtD(o.start)}`);
@@ -578,7 +582,7 @@
             // дедлайны
             for (const t of s.tasks) {
                 if (s.expelled) break;
-                if (t.done || t.overdue || t.expired || now < t.deadline) continue;
+                if (t.done || t.overdue || t.expired || gnow < t.deadline) continue;
                 ch = true;
                 if (t.extra) { t.expired = true; notify(s, `⌛ Доп. задание «${t.title}» истекло.`); }
                 else { t.overdue = true; addStrike(s, `задание не сдано вовремя — ${t.title}`, t.id); }
@@ -587,9 +591,9 @@
             const g = gpa(s);
             if (!s.expelled && g !== null && s.grades.length >= 3 && g < c.lowGpa) {
                 if (!s.lowGpaSince) {
-                    s.lowGpaSince = now; ch = true;
+                    s.lowGpaSince = gnow; ch = true;
                     notify(s, `📉 Средний балл ${g.toFixed(2)} ниже ${c.lowGpa}. Если он останется низким ${c.lowGpaDays} дн., последует отчисление.`, 'warn');
-                } else if (now - s.lowGpaSince >= c.lowGpaDays * DAY) {
+                } else if (gnow - s.lowGpaSince >= c.lowGpaDays * DAY) {
                     expel(s, `средний балл долгое время ниже ${c.lowGpa}`); ch = true;
                 }
             } else if (s.lowGpaSince) {
@@ -613,6 +617,7 @@
         for (const k in d) if (s.social[k] === undefined) s.social[k] = Array.isArray(d[k]) ? [] : d[k];
         if (!s.stories) s.stories = [];
         if (!s.meetings) s.meetings = [];
+        if (!s.clock) s.clock = { mode: cfg().timeMode || 'game', t: Date.now(), source: 'старт' };
         if (!s.jealousy) s.jealousy = [];
         return s.social;
     }
@@ -697,7 +702,7 @@
     }
     /** Новые задания раз в день: генерирует ИИ, без повторов. */
     function refreshQuests(s) {
-        const so = soc(s), day = dkey(Date.now());
+        const so = soc(s), day = dkey(NOW());
         if (so.questDay === day) return false;
         so.questDay = day;
         for (const q of so.quests) if (!q.done && q.k === 'rp') notify(s, `⌛ Задание «${q.t}» так и не выполнено.`, 'social');
@@ -742,7 +747,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         return true;
     }
     function completeQuest(s, q) {
-        q.done = true; q.doneAt = Date.now();
+        q.done = true; q.doneAt = NOW();
         if (q.r.authority) addStat(s, 'authority', q.r.authority);
         if (q.r.money) tx(s, q.r.money, `Награда за задание: ${q.t}`);
         notify(s, `🏆 Задание выполнено: ${q.t}${q.r.authority ? ` (авторитет +${q.r.authority}` : ''}${q.r.money ? `, +${money(q.r.money)}` : ''}${q.r.authority ? ')' : ''}`, 'important');
@@ -825,7 +830,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
     function jealousNote(s, th) {
         if (th.kind !== 'char') return '';
-        const j = s.jealousy.filter((x) => Date.now() - x.t < 3 * DAY).slice(-2);
+        const j = s.jealousy.filter((x) => NOW() - x.t < 3 * DAY).slice(-2);
         return j.length ? ` Недавно ${th.name} узнал(а), что ${s.profile.name} ходил(а) на свидание с ${j.map((x) => x.with).join(', ')} (${j[j.length - 1].how}) — это задело, персонаж реагирует в характере.` : '';
     }
 
@@ -835,7 +840,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     const KINDS = { date: 'Свидание', friends: 'Дружеская встреча', study: 'Совместная учёба' };
     function dayWord(ts) {
         const a = new Date(ts); a.setHours(0, 0, 0, 0);
-        const b = new Date(); b.setHours(0, 0, 0, 0);
+        const b = new Date(NOW()); b.setHours(0, 0, 0, 0);
         const d = Math.round((a - b) / DAY);
         return d === 0 ? 'сегодня' : d === 1 ? 'завтра' : d === 2 ? 'послезавтра' : new Date(ts).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
     }
@@ -844,7 +849,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     const isoDay = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
     /** Возвращает текст ошибки или пустую строку. */
     function meetProblem(s, at, place) {
-        if (!Number.isFinite(at) || at < Date.now() + 5 * MIN) return 'Выберите время хотя бы через 5 минут.';
+        if (!Number.isFinite(at) || at < NOW() + 5 * MIN) return 'Выберите время хотя бы через 5 минут.';
         if (s.meetings.some((m) => m.status === 'accepted' && Math.abs(m.at - at) < HOUR)) return 'На это время уже назначена другая встреча.';
         const ov = occurrences(s, at - 3 * HOUR, at + HOUR).find((o) => o.start < at + HOUR && o.end > at);
         if (place === 'skip' && !ov) return 'В это время нет пар. Выберите другой вариант.';
@@ -875,12 +880,12 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             if (Math.random() < chance) {
                 const how = pick([`увидел(а) уведомление UniHub на телефоне ${s.profile.name}`, 'кто-то выложил в ленту UniHub фото с этого свидания', 'общий знакомый рассказал', 'случайно оказался(ась) рядом и всё увидел(а) сам(а)']);
                 m.caught = how;
-                s.jealousy.push({ with: m.with, how, t: Date.now() });
+                s.jealousy.push({ with: m.with, how, t: NOW() });
                 updateRel(s, ct, -30, false, 40);
                 notify(s, `💔 ${ct.name} узнал(а) о вашем свидании с ${m.with}…`, 'bad');
                 enqueue(s, async () => {
                     const txt = await aiText(`${world(s)}\n${charCard()}\n\n${ct.name} и ${s.profile.name} — пара. ${ct.name} только что узнал(а), что ${s.profile.name} пошёл(пошла) на свидание с ${m.with}: ${how}. Напиши сообщение ${ct.name} в мессенджере UniHub строго в характере персонажа (ревность, обида, холод, злость, требование объяснений — как ему/ей свойственно). 1–3 предложения, только текст.`);
-                    if (txt) { ct.msgs.push({ me: false, text: cleanMsg(txt).slice(0, 600), t: Date.now() }); ct.unread = (ct.unread || 0) + 1; ct.t = Date.now(); }
+                    if (txt) { ct.msgs.push({ me: false, text: cleanMsg(txt).slice(0, 600), t: NOW() }); ct.unread = (ct.unread || 0) + 1; ct.t = NOW(); }
                 });
             }
         }
@@ -906,6 +911,114 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         return ch;
     }
 
+
+    /* ───────────────────────── часы истории ───────────────────────── */
+
+    const gameMode = (s) => s?.clock?.mode === 'game';
+    /** Текущее время для учёбы, встреч и заданий: часы истории или реальные часы. */
+    function NOW() {
+        const md = ctx().chatMetadata;
+        const s = md && md[MODULE];
+        return s && s.clock && s.clock.mode === 'game' ? s.clock.t : Date.now();
+    }
+    const fmtFull = (ts) => new Date(ts).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+    /** Двигает часы истории. back=true разрешает перевод назад (только вручную). */
+    function setClock(s, ts, source, back = false) {
+        if (!gameMode(s) || !Number.isFinite(ts)) return false;
+        if (ts <= s.clock.t && !back) return false;
+        const jump = ts - s.clock.t;
+        s.clock.t = Math.round(ts);
+        s.clock.source = source;
+        s.clock.synced = Date.now();
+        if (Math.abs(jump) >= 2 * HOUR) notify(s, `🕰️ Время истории: ${fmtFull(s.clock.t)} (${source})`, 'social');
+        tick();
+        save(s); render();
+        return true;
+    }
+    function nextMorning(ts) { const d = new Date(ts); if (d.getHours() >= 5) d.setDate(d.getDate() + 1); d.setHours(7, 30, 0, 0); return d.getTime(); }
+
+    /** Разбор строки с датой/временем. base — текущее время истории. */
+    function parseStoryTime(str, base) {
+        str = String(str || '');
+        const tm = /(\d{1,2})[:.](\d{2})(?!\d)/.exec(str.replace(/\d{4}-\d{2}-\d{2}/, ' '));
+        if (!tm) return null;
+        const hh = +tm[1], mi = +tm[2];
+        if (hh > 23 || mi > 59) return null;
+        const d = new Date(base);
+        let dated = false;
+        let m = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(str);
+        if (m) { d.setFullYear(+m[1], +m[2] - 1, +m[3]); dated = true; }
+        else if ((m = /(\d{1,2})\.(\d{1,2})\.(\d{2,4})/.exec(str))) { d.setFullYear(+m[3] < 100 ? 2000 + +m[3] : +m[3], +m[2] - 1, +m[1]); dated = true; }
+        else if ((m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(str))) { d.setFullYear(+m[3], +m[1] - 1, +m[2]); dated = true; }
+        d.setHours(hh, mi, 0, 0);
+        let ts = d.getTime();
+        if (!dated && ts < base - 2 * HOUR) ts += DAY;
+        return ts;
+    }
+    /** Ищет время истории, которое хранит расширение Horae (метаданные чата, данные сообщения или теги в тексте). */
+    function readHorae(dump) {
+        const c = ctx(), found = [];
+        const KEY = /horae/i, TKEY = /(date|time|clock|datetime|timestamp|时间|日期|время|дата)/i;
+        const walk = (o, path, depth) => {
+            if (!o || depth > 5) return;
+            if (typeof o !== 'object') return;
+            for (const [k, v] of Object.entries(o)) {
+                const p = `${path}.${k}`;
+                if (typeof v === 'string' || typeof v === 'number') { if (TKEY.test(k)) found.push([p, String(v)]); }
+                else walk(v, p, depth + 1);
+            }
+        };
+        const md = c.chatMetadata || {};
+        for (const k of Object.keys(md)) if (KEY.test(k)) walk(md[k], `chatMetadata.${k}`, 0);
+        const chat = c.chat || [];
+        for (let i = chat.length - 1, n = 0; i >= 0 && n < 3; i--, n++) {
+            const m = chat[i];
+            if (!m) continue;
+            for (const k of Object.keys(m)) if (KEY.test(k)) walk(m[k], `chat[${i}].${k}`, 0);
+            for (const k of Object.keys(m.extra || {})) if (KEY.test(k)) walk(m.extra[k], `chat[${i}].extra.${k}`, 0);
+            const raw = String(m.mes || '');
+            const tag = /<horae[^>]*>([\s\S]*?)<\/horae>/i.exec(raw);
+            if (tag) {
+                const line = tag[1].split('\n').find((l) => TKEY.test(l)) || tag[1];
+                found.push([`chat[${i}].mes<horae>`, line.trim()]);
+            }
+        }
+        if (dump) return found;
+        const base = gameMode(S()) ? S().clock.t : Date.now();
+        for (const [, v] of found) { const ts = parseStoryTime(v, base); if (ts) return ts; }
+        return null;
+    }
+    let syncing = false;
+    /** После каждого ответа истории: Horae → определение ИИ → шаг по умолчанию. */
+    async function onStoryMessage() {
+        const s = S();
+        if (!s || !s.auth || !gameMode(s) || syncing) return;
+        const c = cfg(), chat = ctx().chat || [];
+        const last = chat[chat.length - 1];
+        if (!last || last.is_user || last.is_system) return;
+        if (c.syncHorae) { const ts = readHorae(); if (ts && setClock(s, ts, 'Horae')) return; }
+        if (c.syncAI) {
+            syncing = true;
+            try {
+                const text = String(last.mes || '').replace(/<[^>]+>/g, ' ').slice(-2500);
+                const r = await aiJSON(`Часы истории сейчас показывают: ${fmtFull(s.clock.t)}.\nНовое сообщение истории:\n${text}\n\nОпредели, сколько времени прошло в истории за это сообщение. Если в тексте явно названо время или переход («наступило утро», «через час», «в 18:00», «на следующий день») — учти это. Обычный диалог без переходов — 1–15 минут.\nФормат: {"minutes":число прошедших минут от 0 до 1440,"time":"ЧЧ:ММ если текст явно называет текущее время, иначе null","nextDay":true если явно наступил следующий день}`);
+                if (S() !== s) return;
+                if (r && typeof r === 'object') {
+                    let ts = s.clock.t + clamp(Math.round(+r.minutes || 0), 0, 1440) * MIN;
+                    const tm = /^(\d{1,2}):(\d{2})$/.exec(String(r.time || '').trim());
+                    if (tm) {
+                        const d = new Date(s.clock.t); if (r.nextDay === true) d.setDate(d.getDate() + 1);
+                        d.setHours(+tm[1], +tm[2], 0, 0);
+                        let t2 = d.getTime(); if (t2 < s.clock.t) t2 += DAY;
+                        ts = t2;
+                    } else if (r.nextDay === true && ts < nextMorning(s.clock.t) - 2 * HOUR) ts = nextMorning(s.clock.t);
+                    if (setClock(s, ts, 'ИИ по тексту')) return;
+                    return;
+                }
+            } finally { syncing = false; }
+        }
+        setClock(s, s.clock.t + (Number(c.stepMin) || 10) * MIN, 'шаг за сообщение');
+    }
     /* ───────────────────────── инъекция в промпт ───────────────────────── */
 
     function buildInjection() {
@@ -914,6 +1027,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const p = s.profile, g = gpa(s);
         const L = [`[UniHub — статус студента ${p.name}]`];
         if (s.expelled) L.push(`${p.name} ОТЧИСЛЕН(А) из университета. Причина: ${s.expelReason}.`);
+        if (gameMode(s)) L.push(`Время истории (часы UniHub): ${fmtFull(s.clock.t)}.`);
         L.push(`Вид: ${p.species || '—'}; факультет: ${p.faculty}; ${p.year} курс. Рейтинг ${rating(s)}%, нарушений ${activeStrikes(s).length}/${cfg().maxStrikes} в четверти, средний балл ${g === null ? 'нет оценок' : g.toFixed(2)}, баланс ${money(s.wallet.balance)}.`);
         if (!s.expelled) {
             const { cur, next } = curNext(s);
@@ -931,7 +1045,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             const lines = ct ? ct.msgs.filter((m) => !m.sys && m.t > since).slice(-8) : [];
             if (lines.length) L.push(`Недавняя переписка в UniHub между ${p.name} и ${ct.name} (обоим она известна, на неё можно ссылаться в истории):\n${lines.map((m) => `${m.me ? p.name : ct.name} (${fmtT(m.t)}): ${m.text}`).join('\n')}`);
         }
-        const so = soc(s), nowT = Date.now();
+        const so = soc(s), nowT = NOW();
         L.push(`Популярность ${p.name} в UniHub (публично видно): уровень ${levelOf(so)}, ${kfmt(so.followers)} подписчиков.${cancelled(s) ? ` Сейчас ${p.name} «отменяют» в сети — многие студенты настроены враждебно и обсуждают это.` : ''}`);
         for (const m of s.meetings) {
             if (m.status === 'started') L.push(`СЕЙЧАС у ${p.name} ${meetText(m)} — договорились через UniHub. Введи эту встречу в повествование в ближайшем ответе (${m.with} ждёт или приходит), если ${p.name} не отменил(а) её словами в чате.`);
@@ -975,7 +1089,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     function statusBar() {
         const s = S();
         const unread = s ? s.notes.filter((n) => !n.read).length : 0;
-        return `<span class="sh-clock">${fmtT(Date.now())}</span>
+        return `<button class="sh-clock" data-act="go" data-view="clock" title="Время">${s && gameMode(s) ? `🕰️ ${fmtT(s.clock.t)}` : fmtT(Date.now())}</button>
         <span class="sh-brand">UniHub</span>
         <span class="sh-sb-right">
           ${s && s.auth ? `<span class="sh-pill" title="Рейтинг">${rating(s)}%</span><button class="sh-pill" data-act="go" data-view="me" title="Авторитет">⭐ ${Math.round(soc(s).authority)}</button><span class="sh-pill" title="Баланс">${money(s.wallet.balance)}</span>` : ''}
@@ -1106,7 +1220,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         if (ui.channel.startsWith('story:')) chips[ui.channel] = `📖 ${ui.channel.slice(6)}`;
         return `
         <button class="sh-me" data-act="go" data-view="me">${ava(s.profile.name)}<div><b>${esc(s.profile.name)}</b><small>Ур. ${levelOf(soc(s))} · ${kfmt(s.social.followers)} подписчиков · авторитет ${Math.round(s.social.authority)}</small></div><i class="fa-solid fa-chevron-right"></i></button>
-        ${cancelled(s) ? `<div class="sh-note bad"><i class="fa-solid fa-ban"></i><span>Вас «отменяют» ещё ${left(s.social.cancelledUntil)}: охваты урезаны, подписчики уходят.</span></div>` : ''}
+        ${cancelled(s) ? `<div class="sh-note bad"><i class="fa-solid fa-ban"></i><span>Вас «отменяют» ещё ${left(s.social.cancelledUntil, Date.now())}: охваты урезаны, подписчики уходят.</span></div>` : ''}
         ${authors.length ? `<div class="sh-stories">${authors.map((p) => `<button class="sh-story" data-act="person" data-name="${esc(p.author)}">${ava(p.author, true)}<small>${esc(p.author.split(' ')[0])}</small></button>`).join('')}</div>` : ''}
         <div class="sh-chips">${Object.entries(chips).map(([k, v]) => `<button class="sh-chip ${ui.channel === k ? 'on' : ''}" data-act="channel" data-ch="${k}">${esc(k === 'species' && s.profile.species ? s.profile.species : v)}</button>`).join('')}</div>
         <div class="sh-card sh-compose">
@@ -1167,7 +1281,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
           ${PERKS[lv + 1] ? `<small>На уровне ${lv + 1}: ${PERKS[lv + 1]}</small>` : ''}
         </div>
         <div class="sh-card"><h4>Задания дня</h4>${so.questsLoading && !so.quests.length ? '<p class="sh-muted"><i class="fa-solid fa-spinner fa-spin"></i> Придумываю задания…</p>' : so.quests.length ? so.quests.map((q) => questHTML(q)).join('') : '<p class="sh-muted">Задания появятся в течение минуты.</p>'}
-          ${so.rerollDay !== dkey(Date.now()) && so.quests.length ? '<button class="sh-link" data-act="rerollQuests"><i class="fa-solid fa-rotate"></i> Заменить задания (раз в день)</button>' : ''}</div>`;
+          ${so.rerollDay !== dkey(NOW()) && so.quests.length ? '<button class="sh-link" data-act="rerollQuests"><i class="fa-solid fa-rotate"></i> Заменить задания (раз в день)</button>' : ''}</div>`;
     }
     function meView(s) {
         const posts = s.feed.filter((p) => p.mine);
@@ -1183,7 +1297,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     /* — чаты — */
     function chatsTab(s) {
         const list = [...s.threads].sort((a, b) => b.t - a.t);
-        return `<h3 class="sh-h">Сообщения <small><i class="fa-solid fa-lock"></i> сквозное шифрование</small></h3>
+        const typing = (s.pendingDMs || []).map((pd) => `<div class="sh-li static">${ava(pd.from)}<div><b>${esc(pd.isChar ? (s.threads.find((t) => t.kind === 'char')?.name || pd.from) : pd.from)}</b><small class="sh-typing">✍️ пишет вам…</small></div></div>`).join('');
+        return `<h3 class="sh-h">Сообщения <small><i class="fa-solid fa-lock"></i> сквозное шифрование</small></h3>${typing}
         <div class="sh-row sh-card"><input id="sh-newchat" placeholder="Имя студента или преподавателя"><button class="sh-btn sm" data-act="newChat">Написать</button></div>
         ${list.length ? list.map((t) => {
         const last = t.msgs[t.msgs.length - 1];
@@ -1251,10 +1366,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
 
     function scheduleView(s) {
-        const now = Date.now();
-        const today = (new Date().getDay() + 6) % 7;
+        const now = NOW();
+        const today = (new Date(NOW()).getDay() + 6) % 7;
         const day = ui.schedDay ?? today;
-        const monday = new Date(); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - today);
+        const monday = new Date(NOW()); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - today);
         const date = new Date(monday); date.setDate(monday.getDate() + day);
         const occ = occurrences(s, date.getTime(), date.getTime() + DAY - 1);
         const early = cfg().checkInEarlyMin * MIN;
@@ -1274,11 +1389,12 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         else if (o.end < now) status = badge('ожидает проверки', 'mid');
         const canCheck = !st && !before && now >= o.start - early && now < o.end && !s.pausedAt;
         const canExcuse = !st && !before && now < o.end && !s.excuses[o.key] && !s.pausedAt;
+        const canGo = !st && !before && now < o.end && o.start - now < 12 * HOUR;
         return `<div class="sh-card sh-class ${live ? 'live' : ''}">
             <div class="sh-class-t"><b>${o.cl.start}</b><small>${o.cl.end}</small></div>
             <div><b>${esc(o.cl.subject)}</b><small>${esc(o.cl.teacher)}${o.cl.room ? `, ${esc(o.cl.room)}` : ''}</small>${status}
             ${s.excuses[o.key] ? `<small class="sh-muted">Деканат: ${esc(s.excuses[o.key].reply)}</small>` : ''}
-            <div class="sh-row">${canCheck ? `<button class="sh-btn sm" data-act="checkin" data-key="${o.key}">Отметиться</button>` : ''}${canExcuse ? `<button class="sh-btn sm ghost" data-act="go" data-view="excuse" data-param="${o.key}">Уважительная причина</button>` : ''}</div></div>
+            <div class="sh-row">${canGo ? `<button class="sh-btn sm" data-act="goClass" data-key="${o.key}"><i class="fa-solid fa-person-walking"></i> Отправиться на пару</button>` : canCheck ? `<button class="sh-btn sm" data-act="checkin" data-key="${o.key}">Отметиться</button>` : ''}${canExcuse ? `<button class="sh-btn sm ghost" data-act="go" data-view="excuse" data-param="${o.key}">Уважительная причина</button>` : ''}</div></div>
           </div>`;
     }).join('') : empty('В этот день пар нет.')}
         <p class="sh-muted">Отметиться можно за ${cfg().checkInEarlyMin} мин до начала и до конца пары. Неотмеченная пара без уважительной причины считается прогулом.</p>
@@ -1294,7 +1410,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
 
     function taskRow(t) {
-        const cls = t.done ? 'ok' : t.overdue ? 'bad' : t.expired ? 'mid' : t.deadline - Date.now() < 3 * HOUR ? 'warn' : '';
+        const cls = t.done ? 'ok' : t.overdue ? 'bad' : t.expired ? 'mid' : t.deadline - NOW() < 3 * HOUR ? 'warn' : '';
         const info = t.done ? `оценка ${t.grade}` : t.expired ? 'истекло' : t.overdue ? 'просрочено, сдайте для исправления' : `осталось ${left(t.deadline)}`;
         return `<button class="sh-li sh-task ${cls}" data-act="go" data-view="task" data-param="${t.id}"><i class="fa-solid ${t.extra ? 'fa-star' : 'fa-book'}"></i><div><b>${esc(t.title)}</b><small>${esc(t.subject)}, ${info}</small></div></button>`;
     }
@@ -1350,9 +1466,9 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const th = s.threads.find((t) => t.id === thId);
         if (!th) return head('Встреча') + empty('Диалог не найден.');
         const pm = th.pendingMeet;
-        const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+        const t0 = new Date(NOW()); t0.setHours(0, 0, 0, 0);
         const pmDay = pm ? clamp(Math.round((new Date(pm.at).setHours(0, 0, 0, 0) - t0) / DAY), 0, 6) : 0;
-        const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return `<option value="${i}" ${i === pmDay ? 'selected' : ''}>${i === 0 ? 'Сегодня' : i === 1 ? 'Завтра' : d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })}</option>`; }).join('');
+        const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(NOW()); d.setDate(d.getDate() + i); return `<option value="${i}" ${i === pmDay ? 'selected' : ''}>${i === 0 ? 'Сегодня' : i === 1 ? 'Завтра' : d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })}</option>`; }).join('');
         return `${head(pm ? 'Добавить встречу' : 'Назначить встречу', esc(th.name))}
         ${pm ? `<div class="sh-note important"><i class="fa-solid fa-handshake"></i><span>Поля заполнены по вашей договорённости в переписке. Проверьте и сохраните.</span></div>` : ''}
         <div class="sh-card sh-form">
@@ -1371,7 +1487,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         return `<div class="sh-card"><b>${esc(KINDS[m.kind])} с ${esc(m.with)}</b> ${badge(st, cls)}
           <small>${fmtWhen(m.at)}, ${esc(PLACES[m.place])}${m.note ? `, ${esc(m.note)}` : ''}</small>
           ${m.caught ? `<small class="sh-bad-t">💔 Об этом узнали: ${esc(m.caught)}</small>` : ''}
-          ${withActions ? `<div class="sh-row">${m.status === 'started' ? `<button class="sh-btn sm" data-act="startScene" data-id="${m.id}">Начать сцену в чате</button>` : ''}${m.status === 'accepted' ? `<button class="sh-btn sm ghost" data-act="cancelMeet" data-id="${m.id}">Отменить</button>` : ''}</div>` : ''}</div>`;
+          ${withActions ? `<div class="sh-row">${m.status === 'accepted' ? `<button class="sh-btn sm" data-act="goMeet" data-id="${m.id}"><i class="fa-solid fa-person-walking"></i> Отправиться на встречу</button>` : ''}${m.status === 'started' ? `<button class="sh-btn sm" data-act="startScene" data-id="${m.id}">Начать сцену в чате</button>` : ''}${m.status === 'accepted' ? `<button class="sh-btn sm ghost" data-act="cancelMeet" data-id="${m.id}">Отменить</button>` : ''}</div>` : ''}</div>`;
     }
     function meetingsView(s) {
         const up = s.meetings.filter((m) => m.status === 'accepted' || m.status === 'started').sort((a, b) => a.at - b.at);
@@ -1380,6 +1496,24 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         <p class="sh-muted">Встречи назначаются в личных сообщениях кнопкой «Встреча».</p>
         <h4>Предстоящие</h4>${up.length ? up.map((m) => meetCard(m, true)).join('') : empty('Нет запланированных встреч.')}
         ${past.length ? `<h4>Прошедшие</h4>${past.map((m) => meetCard(m, false)).join('')}` : ''}`;
+    }
+    function clockView(s) {
+        const c = cfg(), g = gameMode(s);
+        const d = new Date(s.clock.t);
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        return `${head('Время')}
+        <div class="sh-seg"><button class="${g ? 'on' : ''}" data-act="timeMode" data-m="game">Время истории</button><button class="${g ? '' : 'on'}" data-act="timeMode" data-m="real">Реальное время</button></div>
+        ${g ? `<div class="sh-card sh-bigclock"><small>Сейчас в истории</small><b>${fmtT(s.clock.t)}</b><span>${new Date(s.clock.t).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</span><small>Последнее изменение: ${esc(s.clock.source || '—')}</small></div>
+        <div class="sh-grid2"><button class="sh-btn ghost" data-act="clockAdd" data-min="15">+15 мин</button><button class="sh-btn ghost" data-act="clockAdd" data-min="60">+1 час</button><button class="sh-btn ghost" data-act="clockAdd" data-min="180">+3 часа</button><button class="sh-btn ghost" data-act="clockMorning">Следующее утро</button></div>
+        <button class="sh-btn wide" data-act="sleep"><i class="fa-solid fa-moon"></i> Лечь спать</button>
+        <div class="sh-card sh-form"><h4>Точное время</h4><label>Дата<input id="sh-c-date" type="date" value="${iso}"></label><label>Время<input id="sh-c-time" type="time" value="${fmtT(s.clock.t)}"></label><button class="sh-btn sm ghost" data-act="clockSet">Установить</button></div>
+        <div class="sh-card sh-form"><h4>Синхронизация с историей</h4>
+          <label class="sh-toggle"><input type="checkbox" data-change="cfgBool" data-k="syncHorae" ${c.syncHorae ? 'checked' : ''}><span>Брать время из Horae</span></label>
+          <label class="sh-toggle"><input type="checkbox" data-change="cfgBool" data-k="syncAI" ${c.syncAI ? 'checked' : ''}><span>ИИ определяет время по тексту</span></label>
+          <label>Если оба выключены или не сработали — минут за каждый ответ истории<input type="number" min="0" max="120" data-change="cfg" data-k="stepMin" value="${esc(c.stepMin)}"></label>
+          <button class="sh-btn sm ghost" data-act="checkHorae"><i class="fa-solid fa-link"></i> Проверить связь с Horae</button>
+          <small>Часы идут только вперёд и только когда движется история. Пока вы не играете, пары и дедлайны не наступают.</small></div>`
+        : '<div class="sh-note"><i class="fa-solid fa-clock"></i><span>Пары, дедлайны, встречи и задания идут по часам телефона. Подходит, если вы играете синхронно с реальным временем.</span></div>'}`;
     }
     function moreTab(s) {
         const tiles = [['meetings', 'fa-calendar-check', 'Встречи'], ['delivery', 'fa-burger', 'Доставка'], ['market', 'fa-store', 'Маркетплейс'], ['wallet', 'fa-wallet', 'Кошелёк'], ['campus', 'fa-building-columns', 'Кампус'], ['profile', 'fa-id-badge', 'Профиль'], ['settings', 'fa-sliders', 'Настройки']];
@@ -1440,9 +1574,9 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     function campusView(s) {
         const now = Date.now();
         return `${head('Кампус')}
-        <div class="sh-card"><h4>Мероприятия</h4>${s.events.length ? s.events.map((e) => `<div class="sh-li static"><div><b>${esc(e.title)}</b><small>${esc(e.when)}, ${esc(e.place)}. ${esc(e.desc)}</small></div><button class="sh-btn sm ${e.going ? '' : 'ghost'}" data-act="rsvp" data-id="${e.id}">${e.going ? 'Иду' : 'Пойду'}</button></div>`).join('') : '<p class="sh-muted">Список пуст.</p>'}
+        <div class="sh-card"><h4>Мероприятия</h4>${s.events.length ? s.events.map((e) => `<div class="sh-li static"><div><b>${esc(e.title)}</b><small>${esc(e.when)}, ${esc(e.place)}. ${esc(e.desc)}</small></div><div class="sh-col"><button class="sh-btn sm ${e.going ? '' : 'ghost'}" data-act="rsvp" data-id="${e.id}">${e.going ? 'Иду' : 'Пойду'}</button>${e.going ? `<button class="sh-btn sm" data-act="goEvent" data-id="${e.id}">Отправиться</button>` : ''}</div></div>`).join('') : '<p class="sh-muted">Список пуст.</p>'}
           <button class="sh-btn ghost sm" data-act="genEvents"><i class="fa-solid fa-rotate"></i> Найти мероприятия</button></div>
-        <div class="sh-card"><h4>Клубы</h4>${CLUBS.map((c) => `<div class="sh-li static"><div><b>${esc(c)}</b></div><button class="sh-btn sm ${s.clubs.includes(c) ? '' : 'ghost'}" data-act="club" data-c="${esc(c)}">${s.clubs.includes(c) ? 'Участник' : 'Вступить'}</button></div>`).join('')}</div>
+        <div class="sh-card"><h4>Клубы</h4>${CLUBS.map((c) => `<div class="sh-li static"><div><b>${esc(c)}</b></div><div class="sh-col"><button class="sh-btn sm ${s.clubs.includes(c) ? '' : 'ghost'}" data-act="club" data-c="${esc(c)}">${s.clubs.includes(c) ? 'Участник' : 'Вступить'}</button>${s.clubs.includes(c) ? `<button class="sh-btn sm" data-act="goClub" data-c="${esc(c)}">На занятие</button>` : ''}</div></div>`).join('')}</div>
         <div class="sh-card sh-form"><h4>Бронирование помещений</h4><label>Помещение<select id="sh-b-room">${ROOMS.map((r) => `<option>${esc(r)}</option>`).join('')}</select></label><label>Когда<input id="sh-b-when" type="datetime-local"></label><button class="sh-btn sm" data-act="book">Забронировать</button>
           ${s.bookings.filter((b) => b.at > now - DAY).map((b) => `<small class="sh-muted"><i class="fa-solid fa-check"></i> ${esc(b.room)}, ${fmtD(b.at)}</small>`).join('')}</div>
         <div class="sh-card sh-form"><h4>Заявки и жалобы</h4><label>Тип<select id="sh-t-type"><option>Техническое обслуживание</option><option>Жалоба</option><option>Административный вопрос</option></select></label><textarea id="sh-t-text" rows="3" placeholder="Опишите проблему"></textarea><button class="sh-btn sm" data-act="ticket">Отправить заявку</button>
@@ -1473,7 +1607,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const c = cfg();
         const num = (k, l, step = 1) => `<label>${l}<input type="number" step="${step}" data-change="cfg" data-k="${k}" value="${esc(c[k])}"></label>`;
         return `${head('Настройки')}
-        <div class="sh-card"><h4>Время учёбы</h4><p class="sh-muted">Пары и дедлайны идут по реальному времени. На паузе нарушения не начисляются, а сроки заданий сдвигаются на время паузы.</p>
+        ${gameMode(s) ? '<div class="sh-card"><h4>Время учёбы</h4><p class="sh-muted">Включено время истории: пока вы не играете, часы стоят. Управление — нажмите на часы вверху.</p></div>' : ''}
+        <div class="sh-card" ${gameMode(s) ? 'style="display:none"' : ''}><h4>Время учёбы</h4><p class="sh-muted">Пары и дедлайны идут по реальному времени. На паузе нарушения не начисляются, а сроки заданий сдвигаются на время паузы.</p>
           <button class="sh-btn ${s.pausedAt ? '' : 'ghost'}" data-act="pause">${s.pausedAt ? `<i class="fa-solid fa-play"></i> Продолжить (на паузе с ${fmtD(s.pausedAt)})` : '<i class="fa-solid fa-pause"></i> Поставить на паузу'}</button></div>
         <div class="sh-card sh-form"><h4>Связь с чатом</h4>
           <label class="sh-toggle"><input type="checkbox" data-change="cfgBool" data-k="inject" ${c.inject ? 'checked' : ''}><span>Передавать статус студента ИИ</span></label>
@@ -1492,7 +1627,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.8.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.9.1 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -1512,7 +1647,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     const TABS = { feed: feedTab, chats: chatsTab, dating: datingTab, study: studyTab, more: moreTab };
     const VIEWS = {
-        post: postView, person: personView, me: meView, meet: meetView, meetings: meetingsView,
+        post: postView, person: personView, me: meView, meet: meetView, meetings: meetingsView, clock: clockView,
         thread: threadView, excuse: excuseView, task: taskView, delivery: deliveryView, market: marketView,
         wallet: walletView, campus: campusView, profile: profileView, settings: settingsView, notes: notesView,
     };
@@ -1577,7 +1712,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const tm = /^(\d{1,2}):(\d{2})$/.exec(String(mt.time || '').trim());
         if (!dm || !tm) return;
         const at = new Date(+dm[1], +dm[2] - 1, +dm[3], +tm[1], +tm[2]).getTime();
-        if (!(at > Date.now()) || at > Date.now() + 7 * DAY) return;
+        if (!(at > NOW()) || at > NOW() + 7 * DAY) return;
         if (s.meetings.some((m) => m.threadId === th.id && (m.status === 'accepted' || m.status === 'started') && Math.abs(m.at - at) < 2 * HOUR)) return;
         const key = `${isoDay(at)} ${fmtT(at)}`;
         if ((th.dismissedMeets || []).includes(key)) return;
@@ -1605,7 +1740,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 ? `${th.name} — персонажа текущей истории. Строго сохраняй его характер, отношение к ${s.profile.name}, манеру речи и словечки из карточки и примеров; учитывай события истории. Пиши так, как этот персонаж писал бы в мессенджере.`
                 : `${th.name}${th.species ? ` (вид: ${th.species})` : ''}${th.bio ? `. О себе: ${th.bio}` : ''}`;
         const relTxt = th.kind === 'group' ? '' : `\nОтношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100, шкала от −100 вражда до 100 близость).${th.kind === 'char' && s.profile.relWithChar ? ` ${th.name} и ${s.profile.name} — пара.` : ''}${jealousNote(s, th)}`;
-        const raw = await aiRaw(`${world(s)}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist || '(переписки ещё не было)'}\n\n${opts.initiate ? `${opts.initiate}\n\n` : ''}Напиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date().toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(Date.now())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
+        const raw = await aiRaw(`${world(s)}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist || '(переписки ещё не было)'}\n\n${opts.initiate ? `${opts.initiate}\n\n` : ''}Напиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date(NOW()).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(NOW())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
         th.typing = false;
         if (S() !== s) return;
         const js = th.kind === 'group' ? null : parseJSON(raw);
@@ -1651,9 +1786,30 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const from = cleanName(fu.from);
         if (!from || from === s.profile.name) return;
         s.pendingDMs ||= [];
-        const isChar = fu.is_char === true || fu.is_char === 'true';
+        const isChar = fu.is_char === true || fu.is_char === 'true' || looksLikeChar(from);
         if (s.pendingDMs.some((x) => x.from === from || (isChar && x.isChar))) return;
-        s.pendingDMs.push({ id: uid(), at: Date.now() + (60 + Math.floor(Math.random() * 90)) * 1000, from, species: species || '', isChar, intent: cleanMsg(fu.intent || '').slice(0, 300), context: String(context || '').slice(0, 900) });
+        s.pendingDMs.push({ id: uid(), at: Date.now() + (30 + Math.floor(Math.random() * 60)) * 1000, from, species: species || '', isChar, intent: cleanMsg(fu.intent || '').slice(0, 300), context: String(context || '').slice(0, 900) });
+    }
+    const ASK_DM = /(напиш|пиши|жду|черкан|стукн|маякн).{0,25}(в\s*)?(личк|лс|личн|директ|dm)|в\s*(личку|лс|личные|директ)/i;
+    const PROMISE_DM = /(напишу|пишу|кину|скину|отпишу|стукну|жди).{0,40}(личк|лс|личн|директ|dm)|в\s*(личку|лс|личные)\s*(напишу|пишу|кину|скину)/i;
+    /** Похоже ли имя из ленты на персонажа основной истории. */
+    function looksLikeChar(name) {
+        const c = ctx();
+        const ch = c.characters?.[c.characterId];
+        const first = String(name || '').toLowerCase().split(/\s+/)[0];
+        if (!first || first.length < 3) return false;
+        const hay = `${c.name2} ${field(ch, 'description')} ${field(ch, 'personality')}`.toLowerCase();
+        return hay.includes(first);
+    }
+    /** Резервное распознавание, если ИИ не отметил followup. */
+    function guessFollowup(s, p, myText, replyTo, list) {
+        const promise = list.find((c) => (c.replyTo === s.profile.name || c.text.includes(`@${s.profile.name}`)) && PROMISE_DM.test(c.text));
+        if (promise) return { from: promise.author, is_char: looksLikeChar(promise.author), intent: 'продолжить разговор из комментариев, как обещал(а)' };
+        if (myText && ASK_DM.test(myText)) {
+            const target = replyTo || (!p.mine ? p.author : '');
+            if (target) return { from: target, is_char: looksLikeChar(target), intent: `${s.profile.name} попросил(а) написать в личку — продолжить разговор` };
+        }
+        return null;
     }
     function startDM(s, pd) {
         let th;
@@ -1714,10 +1870,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             s.profile.faculty = fac;
             return withBusy('Составляю расписание…', async () => {
                 s.schedule = await genSchedule(s, fac);
-                s.auth = true; s.enforceFrom = Date.now(); s.quarter = { n: 1, start: Date.now() };
+                s.auth = true; s.enforceFrom = NOW(); s.quarter = { n: 1, start: NOW() };
                 s.expelled = false; s.expelReason = '';
                 const c = ctx();
-                if (c.name2 && !c.groupId && !s.threads.some((t) => t.kind === 'char')) s.threads.push({ id: uid(), name: c.name2, species: '', bio: '', kind: 'char', msgs: [], t: Date.now(), unread: 0, rel: 40 });
+                if (c.name2 && !c.groupId && !s.threads.some((t) => t.kind === 'char')) s.threads.push({ id: uid(), name: c.name2, species: '', bio: '', kind: 'char', msgs: [], t: NOW(), unread: 0, rel: 40 });
                 notify(s, `🎓 Добро пожаловать, ${s.profile.name}! Расписание факультета «${fac}» готово.`, 'important');
                 ui.tab = 'study'; ui.studyTab = 'schedule'; ui.view = null;
                 save(s);
@@ -1761,7 +1917,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             const list = await aiComments(s, p, `${s.profile.name} только что написал(а) комментарий${replyTo ? ` в ответ ${replyTo}` : ''}: «${text}». Сгенерируй 1–3 ответа в ветке. ${target ? `${target} обязательно отвечает ${s.profile.name} (replyTo: "${s.profile.name}"). ` : 'Ответь от лица других студентов. '}Может подключиться ещё кто-то из комментаторов или новый студент.`, 'этот комментарий');
             p.loadingComments = false;
             applyScore(s, list.score, null);
-            if (list.followup) scheduleDM(s, list.followup, list.find((c) => c.author === cleanName(list.followup.from))?.species, `Пост ${p.author}: «${p.text.slice(0, 200)}»\n${shownComments(p).slice(-6).map((c) => `${c.author}: ${c.text}`).join('\n')}\n${list.map((c) => `${c.author}: ${c.text}`).join('\n')}`);
+            const fu = list.followup || guessFollowup(s, p, text, replyTo, list);
+            if (fu) scheduleDM(s, fu, list.find((c) => c.author === cleanName(fu.from))?.species || s.feed.find((x) => x.author === cleanName(fu.from))?.species, `Пост ${p.author}: «${p.text.slice(0, 200)}»\n${shownComments(p).slice(-6).map((c) => `${c.author}: ${c.text}`).join('\n')}\n${list.map((c) => `${c.author}: ${c.text}`).join('\n')}`);
             questEvent(s, 'comment', 1, '', text);
             if (replyTo) questEvent(s, 'reply', 1, '', text);
             const st = p.story ? s.stories.find((x) => x.title === p.story) : null;
@@ -1777,8 +1934,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             if (!th) return;
             const kind = val('sh-m-kind'), place = val('sh-m-place'), note = val('sh-m-note').slice(0, 80);
             const [hh, mm] = (val('sh-m-time') || '18:00').split(':').map(Number);
-            const day = new Date(); day.setDate(day.getDate() + (parseInt(val('sh-m-day'), 10) || 0)); day.setHours(hh || 0, mm || 0, 0, 0);
-            const at = day.getTime(), now = Date.now();
+            const day = new Date(NOW()); day.setDate(day.getDate() + (parseInt(val('sh-m-day'), 10) || 0)); day.setHours(hh || 0, mm || 0, 0, 0);
+            const at = day.getTime(), now = NOW();
             const bad = meetProblem(s, at, place);
             if (bad) return toast('warning', bad);
             if (d.agreed) {
@@ -1799,8 +1956,8 @@ ${charCard()}` : ''}
 ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species})` : ''} через UniHub: ${KINDS[kind]}, ${fmtWhen(at)}, ${PLACES[place]}${note ? `, ${note}` : ''}. Отношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100).${th.kind === 'char' && s.profile.relWithChar ? ' Они пара.' : ''} Реши, соглашается ли ${th.name}, учитывая отношения, характер${place === 'skip' ? ', то, что это прогул,' : ''} и тип встречи.
 Формат: {"accept":true,"reply":"ответ в мессенджере, 1–2 предложения"}`);
                 const accept = r?.accept === true || r?.accept === 'true';
-                th.msgs.push({ me: false, text: cleanMsg(r?.reply || (accept ? 'Давай!' : 'Прости, не получится.')).slice(0, 500), t: Date.now() });
-                th.t = Date.now();
+                th.msgs.push({ me: false, text: cleanMsg(r?.reply || (accept ? 'Давай!' : 'Прости, не получится.')).slice(0, 500), t: NOW() });
+                th.t = NOW();
                 if (accept) {
                     addMeeting(s, th, kind, place, note, at);
                     updateRel(s, th, 2, kind === 'date');
@@ -1852,11 +2009,11 @@ ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species}
             if (!confirm(`Отменить встречу с ${m.with}?`)) return;
             m.status = 'cancelled';
             const th = s.threads.find((t) => t.id === m.threadId);
-            const sameDay = dkey(m.at) === dkey(Date.now());
+            const sameDay = dkey(m.at) === dkey(NOW());
             notify(s, `❌ Встреча с ${m.with} отменена.`, 'social');
             if (th) {
                 updateRel(s, th, sameDay ? -5 : -2, false);
-                th.msgs.push({ me: true, text: `❌ Прости, не получится ${fmtWhen(m.at)} — отменяю встречу.`, t: Date.now() });
+                th.msgs.push({ me: true, text: `❌ Прости, не получится ${fmtWhen(m.at)} — отменяю встречу.`, t: NOW() });
                 save(s); render();
                 return reply(s, th);
             }
@@ -1870,7 +2027,7 @@ ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species}
             toggle(false);
         },
         rerollQuests: (d, el, s) => {
-            const so = soc(s), day = dkey(Date.now());
+            const so = soc(s), day = dkey(NOW());
             if (so.rerollDay === day) return toast('info', 'Задания уже обновлялись сегодня. Новые появятся завтра.');
             if (!confirm('Заменить задания дня на новые? Сделать это можно раз в день.')) return;
             so.rerollDay = day;
@@ -1895,6 +2052,63 @@ ${story}
                 if (r?.done === true || r?.done === 'true') { completeQuest(s, q); save(s); }
                 else toast('info', `Пока не засчитано: ${cleanMsg(r?.comment || 'в истории не видно выполнения')}`);
             });
+        },
+        timeMode: (d, el, s) => {
+            if (d.m === 'game' && !gameMode(s)) { s.clock.mode = 'game'; s.clock.t = Math.max(s.clock.t || 0, Date.now()); s.clock.source = 'включено'; }
+            else if (d.m === 'real') s.clock.mode = 'real';
+            cfg().timeMode = d.m; saveCfg();
+            tick(); save(s); render();
+        },
+        clockAdd: (d, el, s) => { setClock(s, s.clock.t + (+d.min) * MIN, 'вручную'); },
+        clockMorning: (d, el, s) => { setClock(s, nextMorning(s.clock.t), 'вручную'); },
+        clockSet: (d, el, s) => {
+            const [y, mo, da] = val('sh-c-date').split('-').map(Number), [hh, mi] = val('sh-c-time').split(':').map(Number);
+            const ts = new Date(y, mo - 1, da, hh, mi).getTime();
+            if (!Number.isFinite(ts)) return toast('warning', 'Укажите дату и время.');
+            if (ts < s.clock.t && !confirm('Перевести часы истории назад? Уже прошедшие пары и дедлайны останутся как есть.')) return;
+            setClock(s, ts, 'вручную', true);
+        },
+        sleep: (d, el, s) => {
+            fillChatInput(`*${s.profile.name} ложится спать.*`);
+            setClock(s, nextMorning(s.clock.t), 'сон');
+            toast('info', 'Утро наступило в UniHub. Отправьте сообщение в чат, чтобы история тоже перешла к утру.');
+            toggle(false);
+        },
+        checkHorae: () => {
+            const found = readHorae(true);
+            if (!found.length) { logErr('Horae', 'данные о времени не найдены (метаданные чата, последние 3 сообщения, теги <horae>)'); return toast('warning', 'Время от Horae не найдено. Подробности — в журнале ошибок; пришлите его, и я подстрою связку.'); }
+            logErr('Horae: найдено', found.slice(0, 12).map(([p, v]) => `${p} = ${v}`).join(' | '));
+            const ts = readHorae();
+            toast(ts ? 'success' : 'warning', ts ? `Horae найден: ${fmtFull(ts)}` : 'Horae найден, но время не удалось разобрать. Пришлите журнал ошибок.');
+        },
+        goClass: (d, el, s) => {
+            const o = findOcc(s, d.key);
+            if (!o || s.attendance[d.key]) return;
+            if (gameMode(s) && s.clock.t < o.start) setClock(s, o.start - 2 * MIN, 'на пару');
+            s.attendance[d.key] = 'present';
+            questEvent(s, 'checkin');
+            notify(s, `✅ Вы на паре «${o.cl.subject}».`);
+            fillChatInput(`*${s.profile.name} отправляется на пару «${o.cl.subject}»${o.cl.room ? ` (${o.cl.room})` : ''}${o.cl.teacher ? `, ведёт ${o.cl.teacher}` : ''}.*`);
+            save(s); toggle(false);
+        },
+        goMeet: (d, el, s) => {
+            const m = s.meetings.find((x) => x.id === d.id);
+            if (!m || m.status !== 'accepted') return;
+            if (gameMode(s) && s.clock.t < m.at) setClock(s, m.at, 'на встречу');
+            if (m.status === 'accepted') startMeeting(s, m);
+            fillChatInput(`*${s.profile.name} отправляется на встречу с ${m.with} — ${PLACES[m.place]}${m.note ? `, ${m.note}` : ''}.*`);
+            save(s); toggle(false);
+        },
+        goEvent: (d, el, s) => {
+            const e = s.events.find((x) => x.id === d.id);
+            if (!e) return;
+            fillChatInput(`*${s.profile.name} отправляется на мероприятие «${e.title}»${e.place ? ` — ${e.place}` : ''}.*`);
+            toast('info', 'Если мероприятие позже — переведите часы истории в «Время».');
+            toggle(false);
+        },
+        goClub: (d, el, s) => {
+            fillChatInput(`*${s.profile.name} идёт на занятие клуба «${d.c}».*`);
+            toggle(false);
         },
         cLike: (d, el, s) => {
             const c = s.feed.find((x) => x.id === d.post)?.comments?.find((x) => x.id === d.id);
@@ -1993,10 +2207,10 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
         schedDay: (d) => { ui.schedDay = +d.d; render(); },
         regenSchedule: (d, el, s) => {
             if (!confirm('Составить расписание заново? Посещаемость прошлых пар сохранится.')) return;
-            return withBusy('Составляю расписание…', async () => { s.schedule = await genSchedule(s, s.profile.faculty); s.enforceFrom = Date.now(); save(s); });
+            return withBusy('Составляю расписание…', async () => { s.schedule = await genSchedule(s, s.profile.faculty); s.enforceFrom = NOW(); save(s); });
         },
         checkin: (d, el, s) => {
-            const o = findOcc(s, d.key); const now = Date.now();
+            const o = findOcc(s, d.key); const now = NOW();
             if (!o || s.attendance[d.key]) return;
             if (now < o.start - cfg().checkInEarlyMin * MIN || now >= o.end) return toast('warning', 'Отметка сейчас недоступна.');
             s.attendance[d.key] = 'present';
@@ -2007,7 +2221,7 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
         excuse: (d, el, s) => {
             const o = findOcc(s, d.key); const reason = val('sh-excuse');
             if (!o || s.attendance[d.key] || s.excuses[d.key]) return;
-            if (Date.now() >= o.end) return toast('warning', 'Пара уже закончилась, запрос не принят.');
+            if (NOW() >= o.end) return toast('warning', 'Пара уже закончилась, запрос не принят.');
             if (reason.length < 10) return toast('warning', 'Опишите причину подробнее.');
             return withBusy('Деканат рассматривает запрос…', async () => {
                 const r = await aiJSON(`${world(s)}\n\nСтудент ${s.profile.name} просит признать отсутствие на паре «${o.cl.subject}» (${fmtD(o.start)}) уважительным. Причина: «${reason}». Ты — деканат. Уважительные причины: болезнь, форс-мажор, официальные мероприятия университета, особенности вида (полнолуние для оборотня, солнце для вампира и т.п.). Неуважительные: лень, проспал, свидание, «не хотелось».\nФормат: {"valid":true,"reply":"ответ деканата, 1 предложение"}`);
@@ -2022,7 +2236,7 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
         extra: (d, el, s) => {
             if (s.tasks.some((t) => t.extra && !t.done && !t.expired)) return toast('warning', 'Сначала выполните уже взятое доп. задание.');
             const subjects = [...new Set(s.schedule.map((c) => c.subject))];
-            const t = { id: uid(), src: `extra-${uid()}`, subject: pick(subjects.length ? subjects : ['Общий курс']), title: 'Доп. задание', desc: '', issued: Date.now(), deadline: Date.now() + cfg().extraTaskHours * HOUR, done: false, overdue: false, extra: true };
+            const t = { id: uid(), src: `extra-${uid()}`, subject: pick(subjects.length ? subjects : ['Общий курс']), title: 'Доп. задание', desc: '', issued: NOW(), deadline: NOW() + cfg().extraTaskHours * HOUR, done: false, overdue: false, extra: true };
             s.tasks.push(t);
             genTaskDesc(s, t);
             ui.view = 'task'; ui.param = t.id;
@@ -2038,17 +2252,17 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
                 const r = await aiJSON(`${world(s)}\n\nТы — преподаватель предмета «${t.subject}». Оцени ответ студента по пятибалльной шкале (2 — неудовлетворительно, 3, 4, 5 — отлично). Строго, но справедливо: отписки и ответы не по теме — 2.\nЗадание: ${t.desc}\nОтвет студента: ${ans}\nФормат: {"grade":4,"comment":"1–2 предложения"}`);
                 let grade = Math.round(Number(r?.grade));
                 if (!(grade >= 2 && grade <= 5)) grade = ans.length > 300 ? 4 : 3;
-                const late = Date.now() > t.deadline && !t.extra;
+                const late = NOW() > t.deadline && !t.extra;
                 if (late) grade = Math.min(grade, 3);
-                Object.assign(t, { done: true, doneAt: Date.now(), answer: ans, grade, comment: `${String(r?.comment || '').slice(0, 400)}${late ? ' Сдано после срока, оценка не выше 3.' : ''}` });
-                s.grades.push({ id: uid(), subject: t.subject, grade, t: Date.now(), q: s.quarter.n, task: t.title });
+                Object.assign(t, { done: true, doneAt: NOW(), answer: ans, grade, comment: `${String(r?.comment || '').slice(0, 400)}${late ? ' Сдано после срока, оценка не выше 3.' : ''}` });
+                s.grades.push({ id: uid(), subject: t.subject, grade, t: NOW(), q: s.quarter.n, task: t.title });
                 notify(s, `✅ «${t.title}»: оценка ${grade}.`);
                 questEvent(s, 'homework');
                 if (grade === 5) questEvent(s, 'grade5', 1, t.subject);
                 if (t.extra) {
                     const fixable = activeStrikes(s).find((k) => !k.taskId || s.tasks.find((x) => x.id === k.taskId)?.done);
                     if (grade < 3) notify(s, 'Доп. задание выполнено на 2 — нарушение не снято.', 'warn');
-                    else if (fixable) { fixable.fixed = true; fixable.fixedAt = Date.now(); notify(s, `🩹 Нарушение снято: ${fixable.reason}. Рейтинг: ${rating(s)}%.`, 'important'); }
+                    else if (fixable) { fixable.fixed = true; fixable.fixedAt = NOW(); notify(s, `🩹 Нарушение снято: ${fixable.reason}. Рейтинг: ${rating(s)}%.`, 'important'); }
                     else if (activeStrikes(s).length) notify(s, 'Чтобы снять нарушение за несданное задание, сначала сдайте само просроченное задание.', 'warn');
                 }
                 save(s);
@@ -2086,7 +2300,7 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
         },
         reenroll: (d, el, s) => {
             if (!confirm('Подать документы заново? Расписание, оценки, задания и нарушения будут сброшены.')) return;
-            Object.assign(s, { auth: false, schedule: [], attendance: {}, excuses: {}, tasks: [], strikes: [], grades: [], expelled: false, expelReason: '', lowGpaSince: 0, quarter: { n: 1, start: Date.now() } });
+            Object.assign(s, { auth: false, schedule: [], attendance: {}, excuses: {}, tasks: [], strikes: [], grades: [], expelled: false, expelReason: '', lowGpaSince: 0, quarter: { n: 1, start: NOW() } });
             save(s); render();
         },
         changeFaculty: (d, el, s) => {
@@ -2388,6 +2602,7 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
         mount();
         const { eventSource, event_types } = ctx();
         eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
+        if (event_types.MESSAGE_RECEIVED) eventSource.on(event_types.MESSAGE_RECEIVED, () => { onStoryMessage().catch((e) => logErr('Часы истории', e)); });
         setInterval(() => {
             try { tick(); } catch (e) { logErr('Таймер', e); }
             updateInjection();

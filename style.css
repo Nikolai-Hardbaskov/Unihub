@@ -339,3 +339,12 @@
     #unihub-phone .sh-status { gap: 4px; }
     #unihub-phone .sh-pill { padding: 2px 5px; font-size: 10.5px; }
 }
+
+#unihub-phone button.sh-clock { background: none; border: 0; padding: 0; color: var(--sh-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+#unihub-phone .sh-bigclock { text-align: center; }
+#unihub-phone .sh-bigclock b { display: block; font: 700 46px/1.1 var(--sh-serif); color: var(--sh-amber); }
+#unihub-phone .sh-bigclock span { display: block; text-transform: capitalize; margin-bottom: 4px; }
+#unihub-phone .sh-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+#unihub-phone .sh-col { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+
+#unihub-phone .sh-typing { color: var(--sh-amber) !important; font-style: italic; }
