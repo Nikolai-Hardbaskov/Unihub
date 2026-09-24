@@ -67,7 +67,13 @@
     const pad = (t) => String(t).trim().padStart(5, '0');
     const TIME_RE = /^\d{1,2}:\d{2}$/;
     const dkey = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
-    const val = (id) => (document.getElementById(id)?.value ?? '').trim();
+    function byId(id) {
+        const root = document.getElementById('unihub-phone');
+        let el = null;
+        if (root && id !== 'unihub-phone') { try { el = root.querySelector(`#${CSS.escape(id)}`); } catch { el = null; } }
+        return el || document.getElementById(id);
+    }
+    const val = (id) => (byId(id)?.value ?? '').trim();
 
     function left(ts) {
         const d = ts - Date.now();
@@ -619,7 +625,7 @@
         const sp = val(`${pre}-species`);
         p.species = sp === '__other' ? val(`${pre}-species-t`) : sp;
         const ab = val(`${pre}-abil`);
-        if (ab === '__other') { p.abilities = val(`${pre}-abil-t`); p.abilityVisible = !!document.getElementById(`${pre}-abil-v`)?.checked; }
+        if (ab === '__other') { p.abilities = val(`${pre}-abil-t`); p.abilityVisible = !!byId(`${pre}-abil-v`)?.checked; }
         else { p.abilities = ab; p.abilityVisible = !!ABILITIES.find((a) => a.n === ab)?.v; }
         p.year = clamp(parseInt(val(`${pre}-year`), 10) || 1, 1, MAX_YEAR);
     }
@@ -928,7 +934,7 @@
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.2.1 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.2.2 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -955,9 +961,9 @@
     /* ───────────────────────── рендер ───────────────────────── */
 
     function updateFab() {
-        const fab = document.getElementById('sh-fab');
+        const fab = byId('unihub-fab');
         if (!fab) return;
-        fab.style.display = cfg().showFab ? '' : 'none';
+        fab.style.display = cfg().showFab && !ui.open ? 'flex' : 'none';
         const s = S();
         const n = s ? s.notes.filter((x) => !x.read).length + s.threads.reduce((a, t) => a + (t.unread || 0), 0) : 0;
         const b = fab.querySelector('.sh-fab-badge');
@@ -967,7 +973,7 @@
 
     function render() {
         updateFab();
-        const ph = document.getElementById('sh-phone');
+        const ph = byId('unihub-phone');
         if (!ph || !ui.open) return;
         const scr = ph.querySelector('.sh-screen');
         const key = [ui.tab, ui.view, ui.param, ui.studyTab, ui.marketTab].join('|');
@@ -982,16 +988,16 @@
         ph.querySelector('.sh-overlay').innerHTML = ui.busy ? `<div class="sh-busy"><i class="fa-solid fa-spinner fa-spin"></i><span>${esc(ui.busy)}</span></div>` : '';
 
         if (key === lastKey) {
-            for (const [id, v] of Object.entries(saved)) { const el = document.getElementById(id); if (el && scr.contains(el)) el.value = v; }
+            for (const [id, v] of Object.entries(saved)) { const el = byId(id); if (el && scr.contains(el)) el.value = v; }
             scr.scrollTop = top;
-            if (focusId) document.getElementById(focusId)?.focus();
+            if (focusId) byId(focusId)?.focus();
         } else scr.scrollTop = 0;
         if (ui.view === 'thread') scr.scrollTop = scr.scrollHeight;
         lastKey = key;
     }
     function isTyping() {
         const a = document.activeElement;
-        const ph = document.getElementById('sh-phone');
+        const ph = byId('unihub-phone');
         return !!(ph && a && ph.contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName));
     }
 
@@ -1029,7 +1035,7 @@
     }
 
     function fillChatInput(text) {
-        const ta = document.getElementById('send_textarea');
+        const ta = byId('send_textarea');
         if (!ta) return;
         ta.value = text;
         ta.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1042,7 +1048,7 @@
         go: (d) => { ui.view = d.view || null; ui.param = d.param || null; render(); },
         back: () => { ui.view = null; ui.param = null; render(); },
         copyLog: async () => {
-            const ta = document.getElementById('sh-log');
+            const ta = byId('sh-log');
             try { await navigator.clipboard.writeText(logText()); toast('success', 'Журнал скопирован.'); }
             catch { if (ta) { ta.focus(); ta.select(); try { document.execCommand('copy'); toast('success', 'Журнал скопирован.'); } catch { toast('info', 'Зажмите текст пальцем и скопируйте вручную.'); } } }
         },
@@ -1050,7 +1056,7 @@
 
         /* вход */
         loadFac: (d, el, s) => { readAuth(s); return withBusy('Ищу факультеты в лоре…', async () => { s.faculties = await loadFaculties(s); save(s); }); },
-        pickFac: (d, el, s) => { readAuth(s); s.profile.faculty = s.faculties[+d.i]?.name || ''; const f = document.getElementById('sh-a-fac'); if (f) f.value = ''; save(s); render(); },
+        pickFac: (d, el, s) => { readAuth(s); s.profile.faculty = s.faculties[+d.i]?.name || ''; const f = byId('sh-a-fac'); if (f) f.value = ''; save(s); render(); },
         login: (d, el, s) => {
             readAuth(s);
             const fac = val('sh-a-fac') || s.profile.faculty;
@@ -1077,7 +1083,7 @@
             const text = val('sh-post');
             if (!text) return toast('warning', 'Напишите текст поста.');
             s.feed.unshift({ id: uid(), author: s.profile.name, species: s.profile.privacy.species ? s.profile.species : '', channel: val('sh-post-ch') || 'general', text, likes: 0, mine: true, t: Date.now() });
-            document.getElementById('sh-post').value = '';
+            byId('sh-post').value = '';
             save(s); render();
         },
         like: (d, el, s) => { const p = s.feed.find((x) => x.id === d.id); if (!p) return; p.liked = !p.liked; p.likes = Math.max(0, (p.likes || 0) + (p.liked ? 1 : -1)); save(s); render(); },
@@ -1098,7 +1104,7 @@
             const text = val('sh-msg');
             if (!th || !text || th.typing) return;
             th.msgs.push({ me: true, text, t: Date.now() }); th.t = Date.now();
-            document.getElementById('sh-msg').value = '';
+            byId('sh-msg').value = '';
             save(s);
             return reply(s, th);
         },
@@ -1203,7 +1209,7 @@
         calc: (d, el, s) => {
             const extra = val('sh-calc').split(/[\s,;]+/).map(Number).filter((n) => n >= 2 && n <= 5);
             const all = [...s.grades.map((g) => g.grade), ...extra];
-            const out = document.getElementById('sh-calc-out');
+            const out = byId('sh-calc-out');
             if (out) out.textContent = all.length ? `Средний балл станет ${(all.reduce((a, b) => a + b, 0) / all.length).toFixed(2)}.` : 'Введите оценки от 2 до 5.';
         },
         tutor: (d, el, s) => {
@@ -1309,7 +1315,7 @@
             if (!pay(s, sum, `Перевод: ${to}${note ? ` (${note})` : ''}`)) return render();
             const th = s.threads.find((t) => t.name.toLowerCase() === to.toLowerCase());
             if (th) th.msgs.push({ sys: true, text: `Вы перевели ${money(sum)}${note ? `: ${note}` : ''}.`, t: Date.now() });
-            ['sh-w-to', 'sh-w-sum', 'sh-w-note'].forEach((id) => { const e = document.getElementById(id); if (e) e.value = ''; });
+            ['sh-w-to', 'sh-w-sum', 'sh-w-note'].forEach((id) => { const e = byId(id); if (e) e.value = ''; });
             toast('success', `Переведено ${money(sum)} для ${to}.`);
             save(s); render();
         },
@@ -1336,7 +1342,7 @@
             const text = val('sh-t-text');
             if (!text) return toast('warning', 'Опишите проблему.');
             s.tickets.unshift({ id: uid(), type: val('sh-t-type'), text, t: Date.now() });
-            document.getElementById('sh-t-text').value = '';
+            byId('sh-t-text').value = '';
             toast('success', 'Заявка отправлена.');
             save(s); render();
         },
@@ -1346,7 +1352,7 @@
             return withBusy('Деканат отвечает…', async () => {
                 const a = await aiText(`${world(s)}\n\nСтудент ${s.profile.name} (рейтинг ${rating(s)}%, нарушений ${activeStrikes(s).length}) пишет в деканат через UniHub: «${q}». Ответь от лица деканата: 1–3 предложения, официально, в духе этого мира.`);
                 s.dean.unshift({ q, a: a || 'Запрос принят, ответ будет направлен позже.', t: Date.now() });
-                const e = document.getElementById('sh-dean'); if (e) e.value = '';
+                const e = byId('sh-dean'); if (e) e.value = '';
                 save(s);
             });
         },
@@ -1404,7 +1410,7 @@
         const s = S();
         const k = el.dataset?.k;
         if (el.dataset.change === 'idSel') {
-            const box = document.getElementById(el.dataset.other);
+            const box = byId(el.dataset.other);
             if (box) box.style.display = el.value === '__other' ? '' : 'none';
             return;
         }
@@ -1416,7 +1422,7 @@
         e.stopPropagation();
         if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'sh-msg') {
             e.preventDefault();
-            document.querySelector('#sh-phone [data-act="send"]')?.click();
+            document.querySelector('#unihub-phone [data-act="send"]')?.click();
         }
     }
 
@@ -1428,8 +1434,8 @@
         const want = typeof force === 'boolean' ? force : !ui.open;
         if (want === ui.open) { if (want) render(); return; }
         ui.open = want;
-        document.getElementById('sh-phone')?.classList.toggle('open', ui.open);
-        document.getElementById('sh-fab')?.classList.toggle('hidden', ui.open);
+        byId('unihub-phone')?.classList.toggle('open', ui.open);
+        byId('unihub-fab')?.classList.toggle('hidden', ui.open);
         if (ui.open) {
             lastKey = ''; render();
             try { history.pushState({ unihub: true }, ''); } catch { /* нет history */ }
@@ -1446,29 +1452,31 @@
             try { history.pushState({ unihub: true }, ''); } catch { /* нет history */ }
         } else {
             ui.open = false;
-            document.getElementById('sh-phone')?.classList.remove('open');
-            document.getElementById('sh-fab')?.classList.remove('hidden');
+            byId('unihub-phone')?.classList.remove('open');
+            byId('unihub-fab')?.classList.remove('hidden');
         }
     });
 
     function mount() {
-        if (document.getElementById('sh-phone')) return;
+        if (byId('unihub-phone')) return;
         const fab = document.createElement('button');
-        fab.id = 'sh-fab';
+        fab.id = 'unihub-fab';
+        fab.type = 'button';
+        fab.style.cssText = 'position:fixed;right:18px;bottom:110px;z-index:2147483000;display:flex;';
         fab.title = 'UniHub';
         fab.innerHTML = '<i class="fa-solid fa-mobile-screen-button"></i><b class="sh-fab-badge"></b>';
         fab.addEventListener('click', () => toggle());
         document.body.appendChild(fab);
 
         const ph = document.createElement('div');
-        ph.id = 'sh-phone';
+        ph.id = 'unihub-phone';
         ph.innerHTML = '<div class="sh-status"></div><div class="sh-screen"></div><nav class="sh-nav"></nav><div class="sh-overlay"></div>';
         ph.addEventListener('click', onClick);
         ph.addEventListener('change', onChange);
         ph.addEventListener('keydown', onKey);
         document.body.appendChild(ph);
 
-        const menu = document.getElementById('extensionsMenu');
+        const menu = byId('extensionsMenu');
         if (menu) {
             const it = document.createElement('div');
             it.className = 'list-group-item flex-container flexGap5 interactable';
@@ -1478,7 +1486,7 @@
             menu.appendChild(it);
         }
 
-        const box = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
+        const box = byId('extensions_settings2') || byId('extensions_settings');
         if (box) {
             box.insertAdjacentHTML('beforeend', `<div class="unihub-settings"><div class="inline-drawer">
               <div class="inline-drawer-toggle inline-drawer-header"><b>UniHub</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
@@ -1488,13 +1496,27 @@
                 <div class="menu_button" id="sh-cfg-open"><i class="fa-solid fa-mobile-screen-button"></i> Открыть UniHub</div>
                 <div class="menu_button" id="sh-cfg-log"><i class="fa-solid fa-bug"></i> Журнал ошибок</div>
               </div></div></div>`);
-            const f = document.getElementById('sh-cfg-fab'), i = document.getElementById('sh-cfg-inject');
+            const f = byId('sh-cfg-fab'), i = byId('sh-cfg-inject');
             f.checked = !!cfg().showFab; i.checked = !!cfg().inject;
             f.addEventListener('change', () => { cfg().showFab = f.checked; saveCfg(); updateFab(); });
             i.addEventListener('change', () => { cfg().inject = i.checked; saveCfg(); updateInjection(); });
-            document.getElementById('sh-cfg-open').addEventListener('click', () => toggle(true));
-            document.getElementById('sh-cfg-log').addEventListener('click', () => { ui.view = 'log'; toggle(true); });
+            byId('sh-cfg-open').addEventListener('click', () => toggle(true));
+            byId('sh-cfg-log').addEventListener('click', () => { ui.view = 'log'; toggle(true); });
         }
+    }
+
+    function checkFab() {
+        const fab = byId('unihub-fab');
+        if (!fab) return logErr('Плавающая кнопка', 'элемент не создан');
+        if (!cfg().showFab) return;
+        const r = fab.getBoundingClientRect(), cs = getComputedStyle(fab);
+        const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        const covered = top && !fab.contains(top);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0 || r.width === 0 || covered) {
+            logErr('Плавающая кнопка не видна', { display: cs.display, visibility: cs.visibility, opacity: cs.opacity, zIndex: cs.zIndex, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), screen: `${innerWidth}x${innerHeight}`, coveredBy: covered ? `${top.tagName}#${top.id}.${String(top.className).slice(0, 60)}` : '' });
+        }
+        const foreign = ['sh-phone', 'sh-fab', 'studyhub-phone'].filter((id) => document.getElementById(id));
+        if (foreign.length) logErr('Найдено другое похожее расширение', `элементы: ${foreign.join(', ')} — возможен конфликт, попробуйте отключить StudyHub 0.3.0`);
     }
 
     function onChatChanged() {
@@ -1514,12 +1536,13 @@
             updateInjection();
             if (!ui.open) return updateFab();
             if (isTyping()) {
-                const st = document.querySelector('#sh-phone .sh-status');
+                const st = document.querySelector('#unihub-phone .sh-status');
                 if (st) st.innerHTML = statusBar();
                 updateFab();
             } else render();
         }, 30000);
         onChatChanged();
+        setTimeout(checkFab, 3000);
         console.log('[UniHub] загружено');
     }
 

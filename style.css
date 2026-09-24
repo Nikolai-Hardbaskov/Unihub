@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Onest:wght@400;500;600&display=swap');
 
 /* Палитра: чернильная ночь университета + свечной янтарь */
-#sh-phone, #sh-fab {
+#unihub-phone, #unihub-fab {
     --sh-ink: #14111f;
     --sh-card: #1f1a30;
     --sh-line: #332b4a;
@@ -15,21 +15,21 @@
     --sh-sans: 'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
-#sh-fab {
-    position: fixed; right: 18px; bottom: 96px; z-index: 9990;
+#unihub-fab {
+    position: fixed; right: 18px; bottom: 110px; z-index: 2147483000;
     width: 52px; height: 52px; border-radius: 16px; border: 1px solid var(--sh-line);
     background: var(--sh-ink); color: var(--sh-amber); font-size: 22px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
 }
-#sh-fab:focus-visible { outline: 2px solid var(--sh-amber); outline-offset: 2px; }
-#sh-fab .sh-fab-badge {
+#unihub-fab:focus-visible { outline: 2px solid var(--sh-amber); outline-offset: 2px; }
+#unihub-fab .sh-fab-badge {
     position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 5px;
     border-radius: 10px; background: var(--sh-bad); color: #fff; font: 600 11px/20px var(--sh-sans);
 }
 
-#sh-phone {
-    position: fixed; right: 18px; bottom: 18px; z-index: 10050;
+#unihub-phone {
+    position: fixed; right: 18px; bottom: 18px; z-index: 2147483001;
     width: 390px; height: min(780px, calc(100vh - 36px));
     display: none; flex-direction: column; overflow: hidden;
     background: var(--sh-ink); color: var(--sh-text);
@@ -37,243 +37,243 @@
     box-shadow: 0 24px 60px rgba(0, 0, 0, .6);
     font: 400 14px/1.45 var(--sh-sans); text-align: left;
 }
-#sh-phone.open { display: flex; }
+#unihub-phone.open { display: flex; }
 @media (max-width: 640px) {
-    #sh-phone { inset: 0; width: 100%; height: 100dvh; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top, 0); }
-    #sh-phone .sh-status { padding: 8px 8px 6px 14px; }
-    #sh-phone .sh-status .sh-icon { font-size: 19px; padding: 10px; min-width: 42px; min-height: 42px; }
+    #unihub-phone { inset: 0; width: 100%; height: 100dvh; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top, 0); }
+    #unihub-phone .sh-status { padding: 8px 8px 6px 14px; }
+    #unihub-phone .sh-status .sh-icon { font-size: 19px; padding: 10px; min-width: 42px; min-height: 42px; }
 }
-#sh-phone * { box-sizing: border-box; }
-#sh-phone h2, #sh-phone h3, #sh-phone h4 { margin: 0; color: var(--sh-text); }
-#sh-phone p { margin: 6px 0; }
-#sh-phone small { display: block; color: var(--sh-mute); font-size: 12px; }
+#unihub-phone * { box-sizing: border-box; }
+#unihub-phone h2, #unihub-phone h3, #unihub-phone h4 { margin: 0; color: var(--sh-text); }
+#unihub-phone p { margin: 6px 0; }
+#unihub-phone small { display: block; color: var(--sh-mute); font-size: 12px; }
 
 /* статус-бар */
-#sh-phone .sh-status {
+#unihub-phone .sh-status {
     display: flex; align-items: center; gap: 8px; padding: 10px 14px 8px;
     border-bottom: 1px solid var(--sh-line); flex-shrink: 0;
 }
-#sh-phone .sh-clock { font-weight: 600; font-variant-numeric: tabular-nums; }
-#sh-phone .sh-brand { flex: 1; text-align: center; font: 700 19px/1 var(--sh-serif); color: var(--sh-amber); letter-spacing: .02em; }
-#sh-phone .sh-sb-right { display: flex; align-items: center; gap: 4px; }
-#sh-phone .sh-pill { padding: 2px 7px; border-radius: 8px; background: var(--sh-card); font-size: 11px; font-variant-numeric: tabular-nums; }
+#unihub-phone .sh-clock { font-weight: 600; font-variant-numeric: tabular-nums; }
+#unihub-phone .sh-brand { flex: 1; text-align: center; font: 700 19px/1 var(--sh-serif); color: var(--sh-amber); letter-spacing: .02em; }
+#unihub-phone .sh-sb-right { display: flex; align-items: center; gap: 4px; }
+#unihub-phone .sh-pill { padding: 2px 7px; border-radius: 8px; background: var(--sh-card); font-size: 11px; font-variant-numeric: tabular-nums; }
 
-#sh-phone button { font: inherit; color: inherit; cursor: pointer; }
-#sh-phone .sh-icon { position: relative; background: none; border: 0; padding: 6px; font-size: 15px; color: var(--sh-mute); }
-#sh-phone .sh-icon:hover { color: var(--sh-text); }
-#sh-phone .sh-dot {
+#unihub-phone button { font: inherit; color: inherit; cursor: pointer; }
+#unihub-phone .sh-icon { position: relative; background: none; border: 0; padding: 6px; font-size: 15px; color: var(--sh-mute); }
+#unihub-phone .sh-icon:hover { color: var(--sh-text); }
+#unihub-phone .sh-dot {
     position: absolute; top: 0; right: 0; min-width: 16px; height: 16px; padding: 0 4px;
     border-radius: 8px; background: var(--sh-bad); color: #fff; font: 600 10px/16px var(--sh-sans); text-align: center;
 }
-#sh-phone :focus-visible { outline: 2px solid var(--sh-amber); outline-offset: 2px; }
+#unihub-phone :focus-visible { outline: 2px solid var(--sh-amber); outline-offset: 2px; }
 
 /* экран */
-#sh-phone .sh-screen { flex: 1; overflow-y: auto; padding: 12px 12px 16px; overscroll-behavior: contain; }
-#sh-phone .sh-h { font: 700 22px/1.2 var(--sh-serif); margin: 4px 2px 12px; }
-#sh-phone .sh-h small { font: 400 12px var(--sh-sans); margin-top: 2px; }
-#sh-phone h4 { font: 600 13px var(--sh-sans); color: var(--sh-mute); margin: 16px 2px 8px; }
-#sh-phone .sh-card h4 { margin-top: 0; }
-#sh-phone .sh-muted { color: var(--sh-mute); font-size: 12px; }
-#sh-phone .sh-empty { padding: 28px 16px; text-align: center; color: var(--sh-mute); }
+#unihub-phone .sh-screen { flex: 1; overflow-y: auto; padding: 12px 12px 16px; overscroll-behavior: contain; }
+#unihub-phone .sh-h { font: 700 22px/1.2 var(--sh-serif); margin: 4px 2px 12px; }
+#unihub-phone .sh-h small { font: 400 12px var(--sh-sans); margin-top: 2px; }
+#unihub-phone h4 { font: 600 13px var(--sh-sans); color: var(--sh-mute); margin: 16px 2px 8px; }
+#unihub-phone .sh-card h4 { margin-top: 0; }
+#unihub-phone .sh-muted { color: var(--sh-mute); font-size: 12px; }
+#unihub-phone .sh-empty { padding: 28px 16px; text-align: center; color: var(--sh-mute); }
 
-#sh-phone .sh-head { display: flex; align-items: center; gap: 6px; margin: -4px 0 12px; }
-#sh-phone .sh-head h3 { font: 700 20px/1.15 var(--sh-serif); }
+#unihub-phone .sh-head { display: flex; align-items: center; gap: 6px; margin: -4px 0 12px; }
+#unihub-phone .sh-head h3 { font: 700 20px/1.15 var(--sh-serif); }
 
-#sh-phone .sh-card { background: var(--sh-card); border: 1px solid var(--sh-line); border-radius: 14px; padding: 12px; margin-bottom: 10px; }
-#sh-phone .sh-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
-#sh-phone .sh-card.sh-row { margin-top: 0; }
-#sh-phone .sh-row > input { flex: 1; }
+#unihub-phone .sh-card { background: var(--sh-card); border: 1px solid var(--sh-line); border-radius: 14px; padding: 12px; margin-bottom: 10px; }
+#unihub-phone .sh-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+#unihub-phone .sh-card.sh-row { margin-top: 0; }
+#unihub-phone .sh-row > input { flex: 1; }
 
 /* формы: перебиваем глобальные стили ST */
-#sh-phone input:not([type='checkbox']), #sh-phone textarea, #sh-phone select {
+#unihub-phone input:not([type='checkbox']), #unihub-phone textarea, #unihub-phone select {
     width: 100%; margin: 4px 0 0; padding: 9px 10px; border-radius: 10px;
     background: var(--sh-ink); color: var(--sh-text); border: 1px solid var(--sh-line);
     font: 400 14px/1.4 var(--sh-sans); resize: vertical; min-height: 0;
 }
-#sh-phone input:focus, #sh-phone textarea:focus, #sh-phone select:focus { border-color: var(--sh-violet); outline: none; }
-#sh-phone .sh-form label, #sh-phone .sh-auth label { display: block; margin-bottom: 10px; font-size: 12px; color: var(--sh-mute); }
-#sh-phone .sh-toggle { display: flex; align-items: center; gap: 10px; padding: 6px 0; color: var(--sh-text); font-size: 14px; }
-#sh-phone .sh-toggle input { accent-color: var(--sh-amber); width: 18px; height: 18px; }
+#unihub-phone input:focus, #unihub-phone textarea:focus, #unihub-phone select:focus { border-color: var(--sh-violet); outline: none; }
+#unihub-phone .sh-form label, #unihub-phone .sh-auth label { display: block; margin-bottom: 10px; font-size: 12px; color: var(--sh-mute); }
+#unihub-phone .sh-toggle { display: flex; align-items: center; gap: 10px; padding: 6px 0; color: var(--sh-text); font-size: 14px; }
+#unihub-phone .sh-toggle input { accent-color: var(--sh-amber); width: 18px; height: 18px; }
 
 /* кнопки */
-#sh-phone .sh-btn {
+#unihub-phone .sh-btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 7px;
     padding: 10px 14px; border-radius: 11px; border: 1px solid var(--sh-amber);
     background: var(--sh-amber); color: #1b1307; font-weight: 600;
 }
-#sh-phone .sh-btn:hover { filter: brightness(1.08); }
-#sh-phone .sh-btn:disabled { opacity: .45; cursor: not-allowed; }
-#sh-phone .sh-btn.ghost { background: transparent; color: var(--sh-amber); }
-#sh-phone .sh-btn.danger { background: var(--sh-bad); border-color: var(--sh-bad); color: #fff; }
-#sh-phone .sh-btn.sm { padding: 6px 11px; font-size: 13px; }
-#sh-phone .sh-btn.wide, #sh-phone .sh-auth .sh-btn, #sh-phone .sh-form > .sh-btn { width: 100%; margin: 4px 0 10px; }
-#sh-phone .sh-link { background: none; border: 0; padding: 6px 2px; color: var(--sh-mute); font-size: 12px; text-decoration: underline; }
+#unihub-phone .sh-btn:hover { filter: brightness(1.08); }
+#unihub-phone .sh-btn:disabled { opacity: .45; cursor: not-allowed; }
+#unihub-phone .sh-btn.ghost { background: transparent; color: var(--sh-amber); }
+#unihub-phone .sh-btn.danger { background: var(--sh-bad); border-color: var(--sh-bad); color: #fff; }
+#unihub-phone .sh-btn.sm { padding: 6px 11px; font-size: 13px; }
+#unihub-phone .sh-btn.wide, #unihub-phone .sh-auth .sh-btn, #unihub-phone .sh-form > .sh-btn { width: 100%; margin: 4px 0 10px; }
+#unihub-phone .sh-link { background: none; border: 0; padding: 6px 2px; color: var(--sh-mute); font-size: 12px; text-decoration: underline; }
 
 /* чипы и сегменты */
-#sh-phone .sh-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; scrollbar-width: none; }
-#sh-phone .sh-chip { flex-shrink: 0; padding: 5px 12px; border-radius: 20px; border: 1px solid var(--sh-line); background: none; font-size: 13px; color: var(--sh-mute); }
-#sh-phone .sh-chip.on { border-color: var(--sh-violet); color: var(--sh-text); background: rgba(143, 124, 240, .18); }
-#sh-phone .sh-seg { display: flex; background: var(--sh-card); border-radius: 12px; padding: 3px; margin-bottom: 10px; }
-#sh-phone .sh-seg button { flex: 1; border: 0; background: none; padding: 7px; border-radius: 9px; color: var(--sh-mute); }
-#sh-phone .sh-seg button.on { background: var(--sh-line); color: var(--sh-text); }
+#unihub-phone .sh-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; scrollbar-width: none; }
+#unihub-phone .sh-chip { flex-shrink: 0; padding: 5px 12px; border-radius: 20px; border: 1px solid var(--sh-line); background: none; font-size: 13px; color: var(--sh-mute); }
+#unihub-phone .sh-chip.on { border-color: var(--sh-violet); color: var(--sh-text); background: rgba(143, 124, 240, .18); }
+#unihub-phone .sh-seg { display: flex; background: var(--sh-card); border-radius: 12px; padding: 3px; margin-bottom: 10px; }
+#unihub-phone .sh-seg button { flex: 1; border: 0; background: none; padding: 7px; border-radius: 9px; color: var(--sh-mute); }
+#unihub-phone .sh-seg button.on { background: var(--sh-line); color: var(--sh-text); }
 
 /* аватары, бейджи */
-#sh-phone .sh-ava { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; }
-#sh-phone .sh-ava.big { width: 52px; height: 52px; font: 700 22px var(--sh-serif); }
-#sh-phone .sh-badge { display: inline-block; margin: 3px 4px 0 0; padding: 1px 8px; border-radius: 6px; font-size: 11px; background: rgba(143, 124, 240, .2); color: #cfc6ff; }
-#sh-phone .sh-badge.ok { background: rgba(92, 201, 154, .18); color: var(--sh-ok); }
-#sh-phone .sh-badge.bad { background: rgba(239, 95, 118, .18); color: var(--sh-bad); }
-#sh-phone .sh-badge.mid { background: rgba(163, 156, 186, .15); color: var(--sh-mute); }
-#sh-phone .sh-badge.live { background: rgba(240, 180, 76, .2); color: var(--sh-amber); }
-#sh-phone .sh-verified { color: var(--sh-violet); font-size: 12px; }
+#unihub-phone .sh-ava { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; }
+#unihub-phone .sh-ava.big { width: 52px; height: 52px; font: 700 22px var(--sh-serif); }
+#unihub-phone .sh-badge { display: inline-block; margin: 3px 4px 0 0; padding: 1px 8px; border-radius: 6px; font-size: 11px; background: rgba(143, 124, 240, .2); color: #cfc6ff; }
+#unihub-phone .sh-badge.ok { background: rgba(92, 201, 154, .18); color: var(--sh-ok); }
+#unihub-phone .sh-badge.bad { background: rgba(239, 95, 118, .18); color: var(--sh-bad); }
+#unihub-phone .sh-badge.mid { background: rgba(163, 156, 186, .15); color: var(--sh-mute); }
+#unihub-phone .sh-badge.live { background: rgba(240, 180, 76, .2); color: var(--sh-amber); }
+#unihub-phone .sh-verified { color: var(--sh-violet); font-size: 12px; }
 
 /* списки */
-#sh-phone .sh-li {
+#unihub-phone .sh-li {
     width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 4px;
     background: none; border: 0; border-bottom: 1px solid var(--sh-line); text-align: left; position: relative;
 }
-#sh-phone .sh-li > div { flex: 1; min-width: 0; }
-#sh-phone .sh-li small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#sh-phone .sh-li.static { cursor: default; }
-#sh-phone .sh-li .sh-dot { position: static; }
-#sh-phone .sh-task > i { width: 18px; color: var(--sh-mute); }
-#sh-phone .sh-task.bad > i, #sh-phone .sh-task.bad small { color: var(--sh-bad); }
-#sh-phone .sh-task.warn > i, #sh-phone .sh-task.warn small { color: var(--sh-amber); }
-#sh-phone .sh-task.ok > i { color: var(--sh-ok); }
+#unihub-phone .sh-li > div { flex: 1; min-width: 0; }
+#unihub-phone .sh-li small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#unihub-phone .sh-li.static { cursor: default; }
+#unihub-phone .sh-li .sh-dot { position: static; }
+#unihub-phone .sh-task > i { width: 18px; color: var(--sh-mute); }
+#unihub-phone .sh-task.bad > i, #unihub-phone .sh-task.bad small { color: var(--sh-bad); }
+#unihub-phone .sh-task.warn > i, #unihub-phone .sh-task.warn small { color: var(--sh-amber); }
+#unihub-phone .sh-task.ok > i { color: var(--sh-ok); }
 
 /* лента */
-#sh-phone .sh-stories { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 10px; scrollbar-width: none; }
-#sh-phone .sh-story { background: none; border: 0; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 58px; flex-shrink: 0; }
-#sh-phone .sh-story .sh-ava { box-shadow: 0 0 0 2px var(--sh-ink), 0 0 0 4px var(--sh-amber); }
-#sh-phone .sh-story small { max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#sh-phone .sh-post-h { display: flex; gap: 10px; align-items: flex-start; }
-#sh-phone .sh-post-t { margin: 10px 0 6px; white-space: pre-wrap; }
-#sh-phone .sh-media { display: flex; gap: 10px; align-items: center; padding: 22px 14px; margin: 6px 0; border-radius: 10px; background: linear-gradient(160deg, #2a2242, #191426); color: var(--sh-mute); font-style: italic; font-size: 13px; }
-#sh-phone .sh-media i { font-size: 20px; color: var(--sh-violet); font-style: normal; }
-#sh-phone .sh-post-a { display: flex; gap: 14px; }
-#sh-phone .sh-post-a button { background: none; border: 0; padding: 4px 0; color: var(--sh-mute); }
-#sh-phone .sh-post-a button.on { color: var(--sh-bad); }
-#sh-phone .sh-compose textarea { margin: 0; }
+#unihub-phone .sh-stories { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 10px; scrollbar-width: none; }
+#unihub-phone .sh-story { background: none; border: 0; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 58px; flex-shrink: 0; }
+#unihub-phone .sh-story .sh-ava { box-shadow: 0 0 0 2px var(--sh-ink), 0 0 0 4px var(--sh-amber); }
+#unihub-phone .sh-story small { max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#unihub-phone .sh-post-h { display: flex; gap: 10px; align-items: flex-start; }
+#unihub-phone .sh-post-t { margin: 10px 0 6px; white-space: pre-wrap; }
+#unihub-phone .sh-media { display: flex; gap: 10px; align-items: center; padding: 22px 14px; margin: 6px 0; border-radius: 10px; background: linear-gradient(160deg, #2a2242, #191426); color: var(--sh-mute); font-style: italic; font-size: 13px; }
+#unihub-phone .sh-media i { font-size: 20px; color: var(--sh-violet); font-style: normal; }
+#unihub-phone .sh-post-a { display: flex; gap: 14px; }
+#unihub-phone .sh-post-a button { background: none; border: 0; padding: 4px 0; color: var(--sh-mute); }
+#unihub-phone .sh-post-a button.on { color: var(--sh-bad); }
+#unihub-phone .sh-compose textarea { margin: 0; }
 
 /* мессенджер */
-#sh-phone .sh-msgs { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; }
-#sh-phone .sh-msg { align-self: flex-start; max-width: 82%; padding: 8px 11px; border-radius: 14px 14px 14px 4px; background: var(--sh-card); white-space: pre-wrap; word-wrap: break-word; }
-#sh-phone .sh-msg.me { align-self: flex-end; border-radius: 14px 14px 4px 14px; background: #3a2f63; }
-#sh-phone .sh-msg b { display: block; font-size: 12px; color: var(--sh-amber); }
-#sh-phone .sh-msg time { display: block; text-align: right; font-size: 10px; color: var(--sh-mute); margin-top: 2px; }
-#sh-phone .sh-msg.typing { font-style: italic; color: var(--sh-mute); }
-#sh-phone .sh-sys { align-self: center; font-size: 12px; color: var(--sh-mute); padding: 4px 10px; }
-#sh-phone .sh-composer { position: sticky; bottom: -16px; display: flex; gap: 8px; align-items: flex-end; padding: 8px 0 4px; background: var(--sh-ink); }
-#sh-phone .sh-composer textarea { margin: 0; flex: 1; max-height: 120px; }
+#unihub-phone .sh-msgs { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; }
+#unihub-phone .sh-msg { align-self: flex-start; max-width: 82%; padding: 8px 11px; border-radius: 14px 14px 14px 4px; background: var(--sh-card); white-space: pre-wrap; word-wrap: break-word; }
+#unihub-phone .sh-msg.me { align-self: flex-end; border-radius: 14px 14px 4px 14px; background: #3a2f63; }
+#unihub-phone .sh-msg b { display: block; font-size: 12px; color: var(--sh-amber); }
+#unihub-phone .sh-msg time { display: block; text-align: right; font-size: 10px; color: var(--sh-mute); margin-top: 2px; }
+#unihub-phone .sh-msg.typing { font-style: italic; color: var(--sh-mute); }
+#unihub-phone .sh-sys { align-self: center; font-size: 12px; color: var(--sh-mute); padding: 4px 10px; }
+#unihub-phone .sh-composer { position: sticky; bottom: -16px; display: flex; gap: 8px; align-items: flex-end; padding: 8px 0 4px; background: var(--sh-ink); }
+#unihub-phone .sh-composer textarea { margin: 0; flex: 1; max-height: 120px; }
 
 /* знакомства */
-#sh-phone .sh-compat { height: 6px; border-radius: 3px; background: var(--sh-line); overflow: hidden; margin: 8px 0 4px; }
-#sh-phone .sh-compat span { display: block; height: 100%; background: var(--sh-violet); }
-#sh-phone .sh-profile .sh-row .sh-btn { flex: 1; }
+#unihub-phone .sh-compat { height: 6px; border-radius: 3px; background: var(--sh-line); overflow: hidden; margin: 8px 0 4px; }
+#unihub-phone .sh-compat span { display: block; height: 100%; background: var(--sh-violet); }
+#unihub-phone .sh-profile .sh-row .sh-btn { flex: 1; }
 
 /* кабинет: студенческий билет с печатью рейтинга — главный акцент */
-#sh-phone .sh-idcard {
+#unihub-phone .sh-idcard {
     display: flex; align-items: center; gap: 12px; padding: 14px; margin-bottom: 12px;
     border-radius: 16px; border: 1px solid var(--sh-line);
     background: linear-gradient(120deg, #251d3c 0%, #1a1529 70%);
 }
-#sh-phone .sh-idcard > div:nth-child(2) { flex: 1; min-width: 0; }
-#sh-phone .sh-idcard > div > b { font: 700 19px/1.1 var(--sh-serif); }
-#sh-phone .sh-seal {
+#unihub-phone .sh-idcard > div:nth-child(2) { flex: 1; min-width: 0; }
+#unihub-phone .sh-idcard > div > b { font: 700 19px/1.1 var(--sh-serif); }
+#unihub-phone .sh-seal {
     width: 74px; height: 74px; flex-shrink: 0; border-radius: 50%;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     border: 2px dashed var(--sh-ok); color: var(--sh-ok); transform: rotate(-8deg);
 }
-#sh-phone .sh-seal b { font: 700 21px/1 var(--sh-serif); }
-#sh-phone .sh-seal small { color: inherit; font-size: 10px; }
-#sh-phone .sh-seal.warn { border-color: var(--sh-amber); color: var(--sh-amber); }
-#sh-phone .sh-seal.bad { border-color: var(--sh-bad); color: var(--sh-bad); }
+#unihub-phone .sh-seal b { font: 700 21px/1 var(--sh-serif); }
+#unihub-phone .sh-seal small { color: inherit; font-size: 10px; }
+#unihub-phone .sh-seal.warn { border-color: var(--sh-amber); color: var(--sh-amber); }
+#unihub-phone .sh-seal.bad { border-color: var(--sh-bad); color: var(--sh-bad); }
 
-#sh-phone .sh-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; }
-#sh-phone .sh-days button { padding: 7px 0; border-radius: 9px; border: 1px solid var(--sh-line); background: none; color: var(--sh-mute); }
-#sh-phone .sh-days button.today { color: var(--sh-amber); }
-#sh-phone .sh-days button.on { background: var(--sh-line); color: var(--sh-text); }
-#sh-phone .sh-class { display: flex; gap: 12px; }
-#sh-phone .sh-class.live { border-color: var(--sh-amber); }
-#sh-phone .sh-class > div:last-child { flex: 1; min-width: 0; }
-#sh-phone .sh-class-t { width: 46px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
-#sh-phone .sh-class-t b { font-size: 15px; }
+#unihub-phone .sh-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; }
+#unihub-phone .sh-days button { padding: 7px 0; border-radius: 9px; border: 1px solid var(--sh-line); background: none; color: var(--sh-mute); }
+#unihub-phone .sh-days button.today { color: var(--sh-amber); }
+#unihub-phone .sh-days button.on { background: var(--sh-line); color: var(--sh-text); }
+#unihub-phone .sh-class { display: flex; gap: 12px; }
+#unihub-phone .sh-class.live { border-color: var(--sh-amber); }
+#unihub-phone .sh-class > div:last-child { flex: 1; min-width: 0; }
+#unihub-phone .sh-class-t { width: 46px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+#unihub-phone .sh-class-t b { font-size: 15px; }
 
-#sh-phone .sh-note { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; margin-bottom: 8px; border-radius: 12px; background: var(--sh-card); border-left: 3px solid var(--sh-violet); font-size: 13px; }
-#sh-phone .sh-note span { flex: 1; }
-#sh-phone .sh-note small { flex-shrink: 0; }
-#sh-phone .sh-note.warn { border-left-color: var(--sh-amber); }
-#sh-phone .sh-note.bad { border-left-color: var(--sh-bad); }
-#sh-phone .sh-note.important { border-left-color: var(--sh-ok); }
-#sh-phone .sh-note.read { opacity: .7; }
+#unihub-phone .sh-note { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; margin-bottom: 8px; border-radius: 12px; background: var(--sh-card); border-left: 3px solid var(--sh-violet); font-size: 13px; }
+#unihub-phone .sh-note span { flex: 1; }
+#unihub-phone .sh-note small { flex-shrink: 0; }
+#unihub-phone .sh-note.warn { border-left-color: var(--sh-amber); }
+#unihub-phone .sh-note.bad { border-left-color: var(--sh-bad); }
+#unihub-phone .sh-note.important { border-left-color: var(--sh-ok); }
+#unihub-phone .sh-note.read { opacity: .7; }
 
-#sh-phone .sh-bar { height: 8px; border-radius: 4px; background: var(--sh-line); overflow: hidden; margin: 6px 0; }
-#sh-phone .sh-bar span { display: block; height: 100%; background: var(--sh-ok); }
-#sh-phone .sh-bar span.warn { background: var(--sh-amber); }
-#sh-phone .sh-bar span.bad { background: var(--sh-bad); }
+#unihub-phone .sh-bar { height: 8px; border-radius: 4px; background: var(--sh-line); overflow: hidden; margin: 6px 0; }
+#unihub-phone .sh-bar span { display: block; height: 100%; background: var(--sh-ok); }
+#unihub-phone .sh-bar span.warn { background: var(--sh-amber); }
+#unihub-phone .sh-bar span.bad { background: var(--sh-bad); }
 
-#sh-phone .sh-strike { border-left: 3px solid var(--sh-bad); }
-#sh-phone .sh-strike.fixed { border-left-color: var(--sh-ok); opacity: .75; }
-#sh-phone .sh-gpa { text-align: center; }
-#sh-phone .sh-gpa b, #sh-phone .sh-balance b { display: block; font: 700 42px/1.1 var(--sh-serif); color: var(--sh-amber); }
-#sh-phone .sh-balance { text-align: center; }
-#sh-phone .sh-grade { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; font: 700 24px var(--sh-serif); background: var(--sh-line); }
-#sh-phone .sh-grade.sm { width: 36px; height: 30px; font-size: 16px; }
-#sh-phone .sh-grade.g5 { color: var(--sh-ok); }
-#sh-phone .sh-grade.g4 { color: #b3d86b; }
-#sh-phone .sh-grade.g3 { color: var(--sh-amber); }
-#sh-phone .sh-grade.g2 { color: var(--sh-bad); }
-#sh-phone .sh-amt { font-variant-numeric: tabular-nums; font-weight: 600; }
-#sh-phone .sh-amt.in { color: var(--sh-ok); }
-#sh-phone .sh-amt.out { color: var(--sh-text); }
-#sh-phone .sh-qa { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--sh-line); font-size: 13px; }
-#sh-phone .sh-item b { display: block; }
+#unihub-phone .sh-strike { border-left: 3px solid var(--sh-bad); }
+#unihub-phone .sh-strike.fixed { border-left-color: var(--sh-ok); opacity: .75; }
+#unihub-phone .sh-gpa { text-align: center; }
+#unihub-phone .sh-gpa b, #unihub-phone .sh-balance b { display: block; font: 700 42px/1.1 var(--sh-serif); color: var(--sh-amber); }
+#unihub-phone .sh-balance { text-align: center; }
+#unihub-phone .sh-grade { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; font: 700 24px var(--sh-serif); background: var(--sh-line); }
+#unihub-phone .sh-grade.sm { width: 36px; height: 30px; font-size: 16px; }
+#unihub-phone .sh-grade.g5 { color: var(--sh-ok); }
+#unihub-phone .sh-grade.g4 { color: #b3d86b; }
+#unihub-phone .sh-grade.g3 { color: var(--sh-amber); }
+#unihub-phone .sh-grade.g2 { color: var(--sh-bad); }
+#unihub-phone .sh-amt { font-variant-numeric: tabular-nums; font-weight: 600; }
+#unihub-phone .sh-amt.in { color: var(--sh-ok); }
+#unihub-phone .sh-amt.out { color: var(--sh-text); }
+#unihub-phone .sh-qa { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--sh-line); font-size: 13px; }
+#unihub-phone .sh-item b { display: block; }
 
-#sh-phone .sh-expelled { text-align: center; padding: 22px 16px; border-color: var(--sh-bad); }
-#sh-phone .sh-expelled > i { font-size: 30px; color: var(--sh-bad); }
-#sh-phone .sh-expelled h3 { font: 700 24px var(--sh-serif); margin: 8px 0; }
+#unihub-phone .sh-expelled { text-align: center; padding: 22px 16px; border-color: var(--sh-bad); }
+#unihub-phone .sh-expelled > i { font-size: 30px; color: var(--sh-bad); }
+#unihub-phone .sh-expelled h3 { font: 700 24px var(--sh-serif); margin: 8px 0; }
 
 /* сервисы */
-#sh-phone .sh-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
-#sh-phone .sh-tiles button { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 4px; border-radius: 14px; border: 1px solid var(--sh-line); background: var(--sh-card); font-size: 12px; }
-#sh-phone .sh-tiles i { font-size: 22px; color: var(--sh-amber); }
+#unihub-phone .sh-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+#unihub-phone .sh-tiles button { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 4px; border-radius: 14px; border: 1px solid var(--sh-line); background: var(--sh-card); font-size: 12px; }
+#unihub-phone .sh-tiles i { font-size: 22px; color: var(--sh-amber); }
 
 /* вход */
-#sh-phone .sh-auth { padding: 6px 4px; }
-#sh-phone .sh-crest { text-align: center; margin: 10px 0 20px; }
-#sh-phone .sh-crest > i { font-size: 34px; color: var(--sh-amber); }
-#sh-phone .sh-crest h2 { font: 700 34px/1.1 var(--sh-serif); margin-top: 6px; }
-#sh-phone .sh-crest p { color: var(--sh-mute); font-size: 13px; }
-#sh-phone .sh-fac-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-#sh-phone .sh-fac { text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--sh-line); background: var(--sh-card); }
-#sh-phone .sh-fac.on { border-color: var(--sh-amber); background: rgba(240, 180, 76, .1); }
-#sh-phone .sh-fac b { display: block; }
-#sh-phone .sh-fac em { font-size: 11px; color: var(--sh-violet); }
+#unihub-phone .sh-auth { padding: 6px 4px; }
+#unihub-phone .sh-crest { text-align: center; margin: 10px 0 20px; }
+#unihub-phone .sh-crest > i { font-size: 34px; color: var(--sh-amber); }
+#unihub-phone .sh-crest h2 { font: 700 34px/1.1 var(--sh-serif); margin-top: 6px; }
+#unihub-phone .sh-crest p { color: var(--sh-mute); font-size: 13px; }
+#unihub-phone .sh-fac-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+#unihub-phone .sh-fac { text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--sh-line); background: var(--sh-card); }
+#unihub-phone .sh-fac.on { border-color: var(--sh-amber); background: rgba(240, 180, 76, .1); }
+#unihub-phone .sh-fac b { display: block; }
+#unihub-phone .sh-fac em { font-size: 11px; color: var(--sh-violet); }
 
 /* навигация */
-#sh-phone .sh-nav { display: flex; border-top: 1px solid var(--sh-line); flex-shrink: 0; padding-bottom: env(safe-area-inset-bottom, 0); }
-#sh-phone .sh-nav:empty { display: none; }
-#sh-phone .sh-nav button { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 0 8px; border: 0; background: none; color: var(--sh-mute); font-size: 10px; }
-#sh-phone .sh-nav button i { font-size: 17px; }
-#sh-phone .sh-nav button.on { color: var(--sh-amber); }
-#sh-phone .sh-nav .sh-dot { top: 4px; right: calc(50% - 20px); }
+#unihub-phone .sh-nav { display: flex; border-top: 1px solid var(--sh-line); flex-shrink: 0; padding-bottom: env(safe-area-inset-bottom, 0); }
+#unihub-phone .sh-nav:empty { display: none; }
+#unihub-phone .sh-nav button { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 0 8px; border: 0; background: none; color: var(--sh-mute); font-size: 10px; }
+#unihub-phone .sh-nav button i { font-size: 17px; }
+#unihub-phone .sh-nav button.on { color: var(--sh-amber); }
+#unihub-phone .sh-nav .sh-dot { top: 4px; right: calc(50% - 20px); }
 
 /* загрузка */
-#sh-phone .sh-overlay:empty { display: none; }
-#sh-phone .sh-busy {
+#unihub-phone .sh-overlay:empty { display: none; }
+#unihub-phone .sh-busy {
     position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%);
     display: flex; gap: 10px; align-items: center; padding: 10px 16px; border-radius: 20px;
     background: #2b2345; border: 1px solid var(--sh-line); box-shadow: 0 8px 20px rgba(0, 0, 0, .4); white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {
-    #sh-phone .fa-spin { animation: none; }
+    #unihub-phone .fa-spin { animation: none; }
 }
 
-#sh-phone .sh-other { margin: -4px 0 10px; }
-#sh-phone .sh-other .sh-toggle { font-size: 13px; }
-#sh-phone select { appearance: auto; }
+#unihub-phone .sh-other { margin: -4px 0 10px; }
+#unihub-phone .sh-other .sh-toggle { font-size: 13px; }
+#unihub-phone select { appearance: auto; }
 
-#sh-fab.hidden { display: none !important; }
-#sh-phone .sh-status { position: relative; z-index: 2; background: var(--sh-ink); }
-#sh-phone [data-act="close"] { color: var(--sh-text); }
+#unihub-fab.hidden { display: none !important; }
+#unihub-phone .sh-status { position: relative; z-index: 2; background: var(--sh-ink); }
+#unihub-phone [data-act="close"] { color: var(--sh-text); }
