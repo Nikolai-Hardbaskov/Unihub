@@ -366,7 +366,21 @@
         } catch (e) { logErr('[UniHub] AI error', e); }
         return '';
     }
-    const stripThink = (t) => String(t || '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+    /** Убирает размышления модели и служебные блоки других расширений (Horae и т.п.). */
+    const stripThink = (t) => String(t || '')
+        .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
+        .replace(/<(horae|status|state|stats|info|details|summary|meta|tracker|scene|time|location|memory)\b[^>]*>[\s\S]*?(<\/\1>|$)/gi, '')
+        .replace(/<\/?(horae|status|state|stats|info|details|summary|meta|tracker|scene)\b[^>]*>/gi, '');
+    /** Для текста сообщений: ещё и «шапки», которые модель иногда дописывает. */
+    function cleanReply(t) {
+        return stripThink(t)
+            .split('\n')
+            .filter((l) => !/^\s*\**\s*UniHub\s*[—–-]/i.test(l))
+            .filter((l) => !/^\s*\**[^\n]{1,40}\s*(→|->)\s*[^\n]{1,40}\**\s*$/.test(l))
+            .join('\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    }
     function parseJSON(txt) {
         txt = stripThink(txt).replace(/```(?:json)?/gi, '');
         const cands = [];
@@ -385,7 +399,7 @@
         return r;
     }
     async function aiText(prompt) {
-        let t = stripThink(await aiRaw(prompt)).trim();
+        let t = cleanReply(await aiRaw(prompt));
         t = t.replace(/^["«„]+|["»“]+$/g, '').trim();
         return t.slice(0, 1200);
     }
@@ -1537,8 +1551,15 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         <button class="sh-btn ghost wide" data-act="genFeed"><i class="fa-solid fa-rotate"></i> Обновить ленту</button>
         ${posts.length ? posts.map((p) => postHTML(p, s)).join('') : empty('Здесь пока пусто. Обновите ленту или напишите первый пост.')}`;
     }
+    /** Убирает из начала текста @упоминание того, кому отвечают (UniHub ставит его сам). */
+    function stripMention(text, name) {
+        if (!name) return text;
+        const re = new RegExp(`^(\\s*@?${escRe(name)}[,:!]?\\s*)+`, 'i');
+        return String(text).replace(re, '').trim() || text;
+    }
     function commentHTML(c, p) {
         const to = c.replyTo ? `<span class="sh-at">@${esc(c.replyTo)}</span> ` : '';
+        c = { ...c, text: stripMention(c.text, c.replyTo) };
         return `<div class="sh-cmt ${c.replyTo ? 'reply' : ''} ${c.mine ? 'mine' : ''}">${ava(c.author, false, c.mine ? S()?.profile.species : c.species)}
           <div><div class="sh-cmt-b">${c.mine ? `<b>${esc(c.author)}</b>` : nameBtn(c.author, c.species)}<p>${to}${esc(c.text)}</p></div>
           <div class="sh-cmt-a"><span>${fmtT(c.t)}</span>
@@ -1952,7 +1973,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.12.2 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.12.3 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2073,7 +2094,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         th.typing = false;
         if (S() !== s) return;
         const js = th.kind === 'group' ? null : parseJSON(raw);
-        let r = js && typeof js.reply === 'string' ? js.reply : stripThink(raw).trim().replace(/^["«]+|["»]+$/g, '');
+        let r = cleanReply(js && typeof js.reply === 'string' ? js.reply : raw).replace(/^["«]+|["»]+$/g, '');
         const lastMine = [...th.msgs].reverse().find((m) => m.me);
         if (js && th.kind !== 'group') updateRel(s, th, Number(js.delta) || 0, js.flirt === true || js.flirt === 'true', 8, lastMine ? `переписка в UniHub: ${s.profile.name} написал(а) «${lastMine.text.slice(0, 140)}»` : '');
         if (js?.meet && typeof js.meet === 'object') detectMeet(s, th, js.meet);
@@ -2091,7 +2112,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
 
     function cleanName(t) { return String(t || '').replace(/[*_`@]/g, '').trim().slice(0, 50); }
-    function cleanMsg(t) { return String(t || '').replace(/\*\*|__/g, '').trim(); }
+    function cleanMsg(t) { return cleanReply(t).replace(/\*\*|__/g, '').trim(); }
     /** Генерирует комментарии к посту с учётом уже написанных. */
     async function aiComments(s, p, task, scoreWhat) {
         const prev = shownComments(p).slice(-12).map((c) => `${c.author}${c.replyTo ? ` → ${c.replyTo}` : ''}: ${c.text}`).join('\n');
@@ -2104,7 +2125,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${p.text}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}${loreStudentsLine(s, 8)}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
         const arr = Array.isArray(r) ? r : (Array.isArray(r?.comments) ? r.comments : []);
         const list = arr.filter((c) => c && c.author && c.text && cleanName(c.author) !== s.profile.name).slice(0, 8).map((c) => ({
-            id: uid(), author: cleanName(c.author), species: SP(s, c.species), text: cleanMsg(c.text).slice(0, 400),
+            id: uid(), author: cleanName(c.author), species: SP(s, c.species), text: stripMention(cleanMsg(c.text), cleanName(c.replyTo)).slice(0, 400),
             replyTo: cleanName(c.replyTo), likes: Math.max(0, parseInt(c.likes, 10) || 0), liked: false,
         }));
         list.score = r && !Array.isArray(r) ? r.score : null;
