@@ -1930,7 +1930,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
           <label>О себе<textarea id="sh-pf-bio" rows="3">${esc(p.bio)}</textarea></label>
           <button class="sh-btn" data-act="saveProfile">Сохранить профиль</button>
         </div>
-        <div class="sh-card"><h4>Конфиденциальность</h4>${tog('species', 'Показывать вид')}${tog('faculty', 'Показывать факультет')}${tog('abilities', 'Показывать способности')}${tog('dating', 'Участвовать в знакомствах')}</div>
+        <div class="sh-card"><h4>Конфиденциальность</h4>${mundane(s) ? '' : tog('species', 'Показывать вид')}${tog('faculty', 'Показывать факультет')}${mundane(s) ? '' : tog('abilities', 'Показывать способности')}${tog('dating', 'Участвовать в знакомствах')}</div>
         ${ctx().name2 && !ctx().groupId ? `<div class="sh-card"><h4>Отношения</h4><label class="sh-toggle"><input type="checkbox" data-change="relChar" ${p.relWithChar ? 'checked' : ''}><span>В романтических отношениях с ${esc(ctx().name2)}</span></label><small>Если включено, ${esc(ctx().name2)} может узнать о свиданиях с другими через UniHub.</small></div>` : ''}
         <button class="sh-link" data-act="changeFaculty"><i class="fa-solid fa-right-left"></i> Перевестись на другой факультет</button>`;
     }
@@ -1973,7 +1973,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.12.3 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.12.4 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2011,6 +2011,16 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         b.style.display = n ? '' : 'none';
     }
 
+    let styleDiagDone = false;
+    function styleDiag() {
+        if (styleDiagDone) return;
+        const root = document.getElementById('unihub-phone');
+        const sel = root?.querySelector('select'), ta = root?.querySelector('textarea'), cb = root?.querySelector('.sh-toggle input');
+        if (!sel && !ta && !cb) return;
+        styleDiagDone = true;
+        const pick = (el, pseudo) => { if (!el) return '—'; const c = getComputedStyle(el, pseudo || null); return `bg=${c.backgroundColor} img=${c.backgroundImage.slice(0, 40)} op=${c.opacity} filter=${c.filter} shadow=${c.boxShadow.slice(0, 40)} blend=${c.mixBlendMode} appearance=${c.appearance || c.webkitAppearance}${pseudo ? ` content=${c.content}` : ''}`; };
+        logErr('Стили (диагностика темы)', `select: ${pick(sel)} | textarea: ${pick(ta)} | toggle: ${pick(cb)} | toggle::after: ${pick(cb, '::after')} | toggle::before: ${pick(cb, '::before')} | label::before: ${pick(cb?.parentElement, '::before')}`);
+    }
     function render() {
         updateFab();
         const ph = byId('unihub-phone');
@@ -2033,6 +2043,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             if (focusId) byId(focusId)?.focus();
         } else scr.scrollTop = 0;
         if (ui.view === 'thread') scr.scrollTop = scr.scrollHeight;
+        if (ui.view === 'profile' || ui.view === 'settings') setTimeout(() => { try { styleDiag(); } catch { /* нет getComputedStyle */ } }, 300);
         lastKey = key;
     }
     function isTyping() {
