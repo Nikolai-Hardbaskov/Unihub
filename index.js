@@ -125,16 +125,32 @@
         { title: 'Кресло-гнездо для крылатых', cat: 'Мебель', price: 1200, rent: 0, seller: 'Селеста Вингс', rating: 4.7, verified: false },
         { title: 'Конспекты по межвидовому праву', cat: 'Учебники', price: 150, rent: 0, seller: 'Оуэн, 4 курс', rating: 4.2, verified: false },
     ];
-    const SPECIES = ['Человек', 'Вампир', 'Полувампир', 'Оборотень', 'Полуоборотень', 'Фейри', 'Эльф', 'Демон', 'Полудемон', 'Нефилим', 'Ведьма / колдун', 'Сирена', 'Русалка', 'Призрак', 'Дракон (в облике человека)', 'Кицунэ', 'Гарпия', 'Горгона', 'Суккуб / инкуб', 'Голем'];
+    const SPECIES_GROUPS = {
+        'Люди и полукровки': ['Человек', 'Полукровка', 'Нефилим', 'Полуэльф', 'Полувампир', 'Полуоборотень', 'Полудемон', 'Полуфейри', 'Полудракон', 'Дампир'],
+        'Полулюди-звери': ['Кошка-полулюдь', 'Пантера-полулюдь', 'Лиса-полулюдь', 'Волк-полулюдь', 'Кролик-полулюдь', 'Медведь-полулюдь', 'Олень-полулюдь', 'Тигр-полулюдь', 'Лев-полулюдь', 'Змея-полулюдь', 'Сова-полулюдь', 'Ворон-полулюдь', 'Летучая мышь-полулюдь', 'Енот-полулюдь', 'Собака-полулюдь', 'Бык-полулюдь (минотавр)'],
+        'Оборотни и перевёртыши': ['Оборотень', 'Оборотень-волк', 'Оборотень-медведь', 'Оборотень-ягуар', 'Перевёртыш', 'Кицунэ', 'Тануки', 'Селки', 'Доппельгангер'],
+        'Нежить и тени': ['Вампир', 'Призрак', 'Банши', 'Лич', 'Ревенант', 'Разумный зомби', 'Мумия', 'Тень', 'Жнец'],
+        'Фейри и лесной народ': ['Фейри', 'Эльф', 'Тёмный эльф', 'Дриада', 'Нимфа', 'Пикси', 'Сатир', 'Кентавр', 'Гоблин', 'Гном', 'Тролль', 'Огр'],
+        'Демоны и небесные': ['Демон', 'Суккуб', 'Инкуб', 'Бес', 'Ангел', 'Падший ангел', 'Джинн', 'Ифрит', 'Óни'],
+        'Водные': ['Сирена', 'Русалка', 'Тритон', 'Нага', 'Келпи', 'Кракен (в облике человека)'],
+        'Мифические существа': ['Дракон (в облике человека)', 'Феникс (в облике человека)', 'Грифон (в облике человека)', 'Горгона', 'Ламия', 'Гарпия', 'Химера', 'Василиск (в облике человека)', 'Тэнгу', 'Юки-онна', 'Ёкай'],
+        'Маги и создания магии': ['Ведьма / колдун', 'Элементаль огня', 'Элементаль воды', 'Элементаль воздуха', 'Элементаль земли', 'Голем', 'Гомункул', 'Автоматон', 'Слайм', 'Мимик'],
+    };
+    const SPECIES = Object.values(SPECIES_GROUPS).flat();
     // v: true — способность заметна со стороны
-    const ABILITIES = [
-        { n: 'Телепатия', v: false }, { n: 'Эмпатия', v: false }, { n: 'Предвидение', v: false }, { n: 'Внушение', v: false },
-        { n: 'Регенерация', v: false }, { n: 'Сверхсила', v: false }, { n: 'Сверхскорость', v: false }, { n: 'Невидимость', v: false },
-        { n: 'Целительство', v: false }, { n: 'Некромантия', v: false }, { n: 'Чары голоса', v: false }, { n: 'Обострённые чувства', v: false },
-        { n: 'Телекинез', v: true }, { n: 'Управление огнём', v: true }, { n: 'Управление водой', v: true }, { n: 'Управление тенями', v: true },
-        { n: 'Иллюзии', v: true }, { n: 'Крылья', v: true }, { n: 'Рога / хвост / чешуя', v: true }, { n: 'Светящиеся глаза', v: true },
-        { n: 'Видимая аура', v: true }, { n: 'Оборот в зверя', v: true },
-    ];
+    // + в конце названия — способность заметна окружающим (для реакций студентов, в списке не показывается)
+    const ABILITY_GROUPS = {
+        'Разум и чувства': ['Телепатия', 'Эмпатия', 'Чтение эмоций', 'Внушение', 'Гипноз взглядом+', 'Чтение памяти', 'Стирание памяти', 'Ментальный щит', 'Детектор лжи', 'Сноходчество', 'Проекция мыслей', 'Обострённые чувства', 'Ночное зрение', 'Эхолокация', 'Сверхчуткий нюх'],
+        'Прорицание и знание': ['Предвидение', 'Пророческие сны', 'Психометрия (чтение предметов)', 'Ясновидение', 'Видение аур', 'Чтение судьбы', 'Знание языков', 'Разговор с мёртвыми'],
+        'Тело и сила': ['Сверхсила', 'Сверхскорость', 'Регенерация', 'Неуязвимость к ядам', 'Бессмертие', 'Каменная кожа+', 'Ловкость и акробатика', 'Выносливость без сна', 'Дыхание под водой', 'Обращение в зверя+', 'Частичное обращение (когти, клыки)+', 'Смена облика+', 'Изменение возраста+'],
+        'Стихии': ['Управление огнём+', 'Управление водой+', 'Управление воздухом+', 'Управление землёй+', 'Управление льдом+', 'Управление молнией+', 'Управление погодой+', 'Управление светом+', 'Управление тенями+', 'Звуковые волны+', 'Магнетизм+'],
+        'Магия и чары': ['Телекинез+', 'Иллюзии+', 'Невидимость', 'Зачарование предметов', 'Защитные барьеры+', 'Проклятия', 'Снятие проклятий', 'Руническая магия+', 'Алхимический дар', 'Зельеварение', 'Магия крови+', 'Музыкальная магия+', 'Чары голоса', 'Магия удачи', 'Призыв существ+'],
+        'Жизнь, смерть и тьма': ['Целительство+', 'Некромантия+', 'Поглощение жизненной силы', 'Питание эмоциями', 'Контроль крови+', 'Изгнание духов+', 'Благословение', 'Насылание кошмаров', 'Ядовитое прикосновение'],
+        'Пространство и время': ['Телепортация+', 'Порталы+', 'Замедление времени', 'Остановка времени (на секунды)', 'Хождение сквозь стены+', 'Левитация+', 'Полёт на крыльях+', 'Астральная проекция+', 'Дублирование себя+'],
+        'Природа и звери': ['Разговор с животными', 'Управление растениями+', 'Фамильяр-спутник+', 'Общение с духами природы', 'Звериная форма стаи+', 'Власть над насекомыми+'],
+        'Облик и особенности': ['Крылья+', 'Рога+', 'Хвост+', 'Чешуя+', 'Светящиеся глаза+', 'Видимая аура+', 'Очарование внешностью+', 'Изменение голоса', 'Маскировка под человека'],
+    };
+    const ABILITIES = Object.values(ABILITY_GROUPS).flat().map((x) => ({ n: x.replace(/\+$/, ''), v: x.endsWith('+') }));
     const NO_ABIL = 'Отсутствуют';
     const MAX_YEAR = 5;
     const MARKET_CATS = ['Учебники', 'Мебель', 'Электроника', 'Оборудование'];
@@ -507,10 +523,42 @@
         notify(s, `⚠️ Нарушение ${n}/${max}: ${reason}. Рейтинг: ${rating(s)}%.`, 'warn');
         if (n >= max) { expel(s, `${max} нарушений за четверть, рейтинг упал до 5%`); return; }
         enqueue(s, async () => {
-            const txt = await aiText(`${world(s)}\n\nАдминистрация реагирует на нарушение студента ${s.profile.name}: «${reason}». Это ${n}-е нарушение из ${max} в четверти, рейтинг ${rating(s)}%. Опиши одно конкретное последствие в духе этого мира (1–2 предложения): вызов в деканат, отработка, предупреждение куратора, ограничение доступа к общежитию и т.п. Только текст последствия.`);
-            k.consequence = txt || pick(CONSEQ);
-            notify(s, `🏛️ Последствие: ${k.consequence}`, 'warn');
+            const r = await aiJSON(`${world(s)}\n\nАдминистрация реагирует на нарушение студента ${s.profile.name}: «${reason}». Это ${n}-е нарушение из ${max} в четверти, рейтинг ${rating(s)}%. Придумай одно конкретное последствие в духе этого мира${n <= 1 ? ' (первое нарушение — помягче)' : ''}. Всё, что ты назначишь, станет реальным в приложении, поэтому назначай выполнимое.
+Формат: {"from":"кто пишет — имя и должность (куратор, декан, комендант…)","letter":"официальное письмо студенту в мессенджере UniHub, 2–4 предложения","summary":"суть последствия одной фразой","task":null или {"title":"название","desc":"что написать — объяснительная, доклад, эссе; 1–2 предложения","days":от 1 до 7},"appointment":null или {"inDays":от 0 до 7,"time":"ЧЧ:ММ","place":"где именно"}}
+task — если назначена письменная отработка; appointment — если вызывают лично. Можно одно, оба или ни одного.`);
+            if (S() !== s) return;
+            applyConsequence(s, k, r);
         });
+    }
+    /** Письмо в Чаты, взыскание в Задания, вызов во Встречи. */
+    function applyConsequence(s, k, r) {
+        const from = cleanName(r?.from) || 'Деканат факультета';
+        const letter = cleanMsg(r?.letter || r?.summary || pick(CONSEQ)).slice(0, 900);
+        k.consequence = cleanMsg(r?.summary || letter).slice(0, 300);
+        let th = s.threads.find((t) => t.name.toLowerCase() === from.toLowerCase());
+        if (!th) { th = { id: uid(), name: from, species: '', bio: 'представитель администрации университета, пишет официально', kind: 'official', msgs: [], t: Date.now(), unread: 0, rel: 0 }; s.threads.unshift(th); }
+        th.msgs.push({ me: false, text: `📜 ${letter}`, t: Date.now() });
+        th.unread = (th.unread || 0) + 1; th.t = Date.now();
+        k.letter = th.id;
+        const extras = [];
+        if (r?.task && typeof r.task === 'object' && r.task.title) {
+            const days = clamp(parseInt(r.task.days, 10) || 3, 1, 7);
+            const t = { id: uid(), src: `penalty-${k.id}`, subject: 'Взыскание', title: `Взыскание: ${cleanMsg(r.task.title).slice(0, 70)}`, desc: cleanMsg(r.task.desc || '').slice(0, 500), issued: NOW(), deadline: NOW() + days * DAY, done: false, overdue: false, extra: false, penalty: true };
+            s.tasks.push(t);
+            extras.push(`задание до ${fmtD(t.deadline)}`);
+        }
+        if (r?.appointment && typeof r.appointment === 'object') {
+            const tm = /^(\d{1,2}):(\d{2})$/.exec(String(r.appointment.time || '').trim());
+            const d = new Date(NOW()); d.setDate(d.getDate() + clamp(parseInt(r.appointment.inDays, 10) || 1, 0, 7));
+            d.setHours(tm ? +tm[1] : 15, tm ? +tm[2] : 0, 0, 0);
+            let at = d.getTime();
+            if (at < NOW() + HOUR) at += DAY;
+            const ov = occurrences(s, at - 3 * HOUR, at + HOUR).find((o) => o.start < at + HOUR && o.end > at);
+            if (ov) at = ov.end + 15 * MIN;
+            s.meetings.push({ id: uid(), with: from, threadId: th.id, kind: 'official', place: 'custom', placeText: cleanMsg(r.appointment.place || 'кабинет администрации').slice(0, 80), note: '', at, status: 'accepted', created: Date.now() });
+            extras.push(`явка ${fmtWhen(at)}`);
+        }
+        notify(s, `🏛️ ${from}: ${k.consequence}${extras.length ? ` (${extras.join(', ')})` : ''}`, 'warn');
     }
 
     function tick() {
@@ -617,6 +665,12 @@
         for (const k in d) if (s.social[k] === undefined) s.social[k] = Array.isArray(d[k]) ? [] : d[k];
         if (!s.stories) s.stories = [];
         if (!s.meetings) s.meetings = [];
+        for (const k of s.strikes || []) {
+            if (!k.consequence || k.letter) continue;
+            let th = s.threads?.find((t) => t.kind === 'official' && t.name === 'Деканат факультета');
+            if (!th && s.threads) { th = { id: uid(), name: 'Деканат факультета', species: '', bio: 'представитель администрации университета, пишет официально', kind: 'official', msgs: [], t: Date.now(), unread: 0, rel: 0 }; s.threads.unshift(th); }
+            if (th) { th.msgs.push({ me: false, text: `📜 ${k.consequence}`, t: Date.now() }); th.unread = (th.unread || 0) + 1; k.letter = th.id; }
+        }
         if (!s.clock) s.clock = { mode: cfg().timeMode || 'game', t: Date.now(), source: 'старт' };
         if (!s.jealousy) s.jealousy = [];
         return s.social;
@@ -729,7 +783,7 @@ ${Object.entries(QUEST_KINDS).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
 - НЕ повторяй и не перефразируй прошлые задания: ${past.length ? past.join('; ') : 'их пока нет'}.
 ФАКТЫ:
 ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story ? `Последние события истории:\n${story}\n` : 'Истории пока нет.\n'}Переписки в UniHub: ${dms || 'нет'}.
-Сюжеты ленты: ${plots || 'нет'}.
+Сюжеты ленты: ${plots || 'нет'}.${loreStudentsLine(s, 8)}
 Формат: [{"k":"rp","title":"название","desc":"что сделать, 1–2 предложения","n":1,"param":"","authority":2,"money":50,"trigger":"post","hook":null}] — n: сколько раз (для rp всегда 1), authority 1–6, money 0–300; trigger нужен только вместе с hook.`);
             let list = (Array.isArray(r) ? r : []).map((q) => q && makeQuest(q, s)).filter(Boolean).slice(0, 3);
             if (!list.some((q) => q.k === 'rp') || list.length < 3) {
@@ -803,7 +857,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function relLabel(t) {
         const r = t.rel || 0;
-        if (t.kind === 'group') return '';
+        if (t.kind === 'group' || t.kind === 'official') return '';
         if (r <= -60) return 'вражда';
         if (r <= -20) return 'неприязнь';
         if ((t.flirt || 0) >= 3 && r >= 40) return r >= 75 ? 'влюблённость' : 'флирт';
@@ -845,7 +899,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         return d === 0 ? 'сегодня' : d === 1 ? 'завтра' : d === 2 ? 'послезавтра' : new Date(ts).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
     }
     const fmtWhen = (ts) => `${dayWord(ts)} в ${fmtT(ts)}`;
-    const meetText = (m) => `${KINDS[m.kind].toLowerCase()} с ${m.with}, ${PLACES[m.place]}${m.note ? ` (${m.note})` : ''}`;
+    const placeOf = (m) => PLACES[m.place] || m.placeText || '';
+    const meetText = (m) => m.kind === 'official' ? `явка к ${m.with} — ${placeOf(m)}` : `${KINDS[m.kind].toLowerCase()} с ${m.with}, ${placeOf(m)}${m.note ? ` (${m.note})` : ''}`;
     const isoDay = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
     /** Возвращает текст ошибки или пустую строку. */
     function meetProblem(s, at, place) {
@@ -899,6 +954,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             if (m.status === 'accepted' && now > m.at + 3 * HOUR) {
                 m.status = 'missed'; ch = true;
                 const th = s.threads.find((t) => t.id === m.threadId);
+                if (m.kind === 'official') { addStrike(s, `неявка по вызову — ${m.with}`); continue; }
                 if (th) updateRel(s, th, -6, false);
                 notify(s, `😶 Встреча с ${m.with} прошла без вас.`, 'warn');
                 continue;
@@ -1019,6 +1075,46 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         }
         setClock(s, s.clock.t + (Number(c.stepMin) || 10) * MIN, 'шаг за сообщение');
     }
+
+    /* ───────────────────────── люди из лора ───────────────────────── */
+
+    // родня и опекуны — не студенты, в приложении им не место
+    const FAMILY_RE = /(мать|мама|матер|мачех|отец|отчим|папа|родител|опекун|бабушк|бабк|дедушк|дед(?![а-яё])|дяд|тёт|тет[яи]|прадед|прабаб|mother|father|\bmom\b|\bdad\b|parent|guardian|grand|uncle|aunt)/i;
+    function lorePeople(s, role = 'student') { return (s.lorePeople || []).filter((p) => p.role === role); }
+    /** Строка для промптов: какие студенты из лора есть в мире. */
+    function loreStudentsLine(s, max = 10) {
+        const list = lorePeople(s).slice(0, max);
+        const rule = `\nUniHub — приложение для студентов: родители, опекуны, старшие родственники ${ctx().name2} и других персонажей, а также люди вне университета НЕ пользуются им — не делай их авторами постов, комментаторами, анкетами или собеседниками.`;
+        if (!list.length) return rule;
+        return `${rule}\nСтуденты из лора этого мира (используй их среди авторов и собеседников, сохраняя имена, виды и характеры; не меняй им вид): ${list.map((p) => `${p.name} (${p.species || 'вид не указан'}${p.faculty ? `, ${p.faculty}` : ''}${p.year ? `, ${p.year} курс` : ''}): ${p.bio}`).join('; ').slice(0, 1800)}.`;
+    }
+    function lorePerson(s, name) {
+        const n = String(name || '').toLowerCase();
+        return (s.lorePeople || []).find((p) => p.name.toLowerCase() === n || n.startsWith(p.name.toLowerCase().split(' ')[0] + ' ') || p.name.toLowerCase().startsWith(n.split(' ')[0] + ' '));
+    }
+    /** Находит в лорбуке и карточке студентов и сотрудников университета, отсекая родных и посторонних. */
+    async function extractLorePeople(s) {
+        const c = ctx();
+        const lore = await loreText(null);
+        const card = charCard();
+        const r = await aiJSON(`${card}\n\nЛор (лорбук):\n${lore || '(нет)'}\n\nВыпиши всех упомянутых конкретных персонажей, кроме ${c.name2} и ${s.profile.name}. Для каждого определи role:
+- "student" — учится в этом университете;
+- "staff" — преподаватель или сотрудник университета;
+- "other" — все остальные: родители, опекуны, бабушки и дедушки, старшие родственники ${c.name2} и любых других персонажей, горожане, люди вне университета, дети.
+Родители и старшая родня — ВСЕГДА "other", даже если связаны с университетом.
+Формат: [{"name":"имя как в лоре","species":"вид по-русски","role":"student","faculty":"","year":2,"abilities":"","bio":"характер и важное, 1–2 предложения","relation":"кем приходится ${c.name2}"}]. Если никого нет — пустой массив.`);
+        if (S() !== s) return 0;
+        const list = (Array.isArray(r) ? r : []).filter((p) => p && p.name).map((p) => ({
+            name: cleanName(p.name).slice(0, 50), species: cleanMsg(p.species || '').slice(0, 40),
+            role: p.role === 'student' || p.role === 'staff' ? p.role : 'other',
+            faculty: cleanMsg(p.faculty || '').slice(0, 60), year: clamp(parseInt(p.year, 10) || 0, 0, MAX_YEAR),
+            abilities: cleanMsg(p.abilities || '').slice(0, 120), bio: cleanMsg(p.bio || '').slice(0, 300), relation: cleanMsg(p.relation || '').slice(0, 80),
+        })).filter((p) => p.role !== 'other' && !FAMILY_RE.test(p.relation) && p.name.toLowerCase() !== String(c.name2).toLowerCase() && p.name !== s.profile.name);
+        s.lorePeople = list.slice(0, 30);
+        s.lorePeopleAt = Date.now();
+        save(s);
+        return s.lorePeople.length;
+    }
     /* ───────────────────────── инъекция в промпт ───────────────────────── */
 
     function buildInjection() {
@@ -1137,28 +1233,48 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
           <button class="sh-btn" data-act="login"><i class="fa-solid fa-right-to-bracket"></i> Войти и составить расписание</button>
         </div>`;
     }
+    /** Варианты для выпадающих списков фильтров: «любой» + из лора + все группы. */
+    function speciesOptions(s, cur, anyLabel) {
+        const opt = (x) => `<option ${x === cur ? 'selected' : ''}>${esc(x)}</option>`;
+        const lore = s?.loreSpecies || [];
+        return `<option value="" ${!cur ? 'selected' : ''}>${esc(anyLabel)}</option>
+          ${lore.length ? `<optgroup label="Из вашего мира">${lore.map(opt).join('')}</optgroup>` : ''}
+          ${Object.entries(SPECIES_GROUPS).map(([g, list]) => `<optgroup label="${esc(g)}">${list.map(opt).join('')}</optgroup>`).join('')}`;
+    }
+    function abilityOptions(s, cur, anyLabel) {
+        const opt = (x) => `<option ${x === cur ? 'selected' : ''}>${esc(x)}</option>`;
+        const lore = (s?.loreAbilities || []).map((a) => a.n);
+        return `<option value="" ${!cur ? 'selected' : ''}>${esc(anyLabel)}</option>
+          <option value="${NO_ABIL}" ${cur === NO_ABIL ? 'selected' : ''}>Без способностей</option>
+          ${lore.length ? `<optgroup label="Из вашего мира">${lore.map(opt).join('')}</optgroup>` : ''}
+          ${Object.entries(ABILITY_GROUPS).map(([g, list]) => `<optgroup label="${esc(g)}">${list.map((x) => opt(x.replace(/\+$/, ''))).join('')}</optgroup>`).join('')}`;
+    }
     function identityFields(pre, p) {
-        const spKnown = SPECIES.includes(p.species);
-        const abKnown = p.abilities === NO_ABIL || ABILITIES.some((a) => a.n === p.abilities);
+        const lore = S()?.loreSpecies || [];
+        const spKnown = SPECIES.includes(p.species) || lore.includes(p.species);
+        const abKnown = p.abilities === NO_ABIL || ABILITIES.some((a) => a.n === p.abilities) || (S()?.loreAbilities || []).some((a) => a.n === p.abilities);
         const spOther = !!p.species && !spKnown;
         const abOther = !!p.abilities && !abKnown;
         const hidden = (b) => (b ? '' : ' style="display:none"');
         return `
           <label>Вид<select id="${pre}-species" data-change="idSel" data-other="${pre}-species-o">
             <option value="">— выберите —</option>
-            ${SPECIES.map((x) => `<option ${x === p.species ? 'selected' : ''}>${esc(x)}</option>`).join('')}
+            ${lore.length ? `<optgroup label="Из вашего мира">${lore.map((x) => `<option ${x === p.species ? 'selected' : ''}>${esc(x)}</option>`).join('')}</optgroup>` : ''}
+            ${Object.entries(SPECIES_GROUPS).map(([g, list]) => `<optgroup label="${esc(g)}">${list.map((x) => `<option ${x === p.species ? 'selected' : ''}>${esc(x)}</option>`).join('')}</optgroup>`).join('')}
             <option value="__other" ${spOther ? 'selected' : ''}>Другой вид…</option>
           </select></label>
+          <button class="sh-link" data-act="loadSpecies" data-pre="${pre}"><i class="fa-solid fa-book"></i> ${lore.length ? 'Обновить виды из лора' : 'Найти виды в лоре и карточке'}</button>
           <div id="${pre}-species-o" class="sh-other"${hidden(spOther)}><input id="${pre}-species-t" placeholder="Название вида" value="${esc(spOther ? p.species : '')}"></div>
           <label>Способности<select id="${pre}-abil" data-change="idSel" data-other="${pre}-abil-o">
             <option value="">— выберите —</option>
             <option value="${NO_ABIL}" ${p.abilities === NO_ABIL ? 'selected' : ''}>Отсутствуют</option>
-            <optgroup label="Не видны со стороны">${ABILITIES.filter((a) => !a.v).map((a) => `<option ${a.n === p.abilities ? 'selected' : ''}>${esc(a.n)}</option>`).join('')}</optgroup>
-            <optgroup label="Заметны окружающим">${ABILITIES.filter((a) => a.v).map((a) => `<option ${a.n === p.abilities ? 'selected' : ''}>${esc(a.n)}</option>`).join('')}</optgroup>
+            ${(S()?.loreAbilities || []).length ? `<optgroup label="Из вашего мира">${S().loreAbilities.map((a) => `<option ${a.n === p.abilities ? 'selected' : ''}>${esc(a.n)}</option>`).join('')}</optgroup>` : ''}
+            ${Object.entries(ABILITY_GROUPS).map(([g, list]) => `<optgroup label="${esc(g)}">${list.map((x) => x.replace(/\+$/, '')).map((n) => `<option ${n === p.abilities ? 'selected' : ''}>${esc(n)}</option>`).join('')}</optgroup>`).join('')}
             <option value="__other" ${abOther ? 'selected' : ''}>Другая способность…</option>
           </select></label>
           <div id="${pre}-abil-o" class="sh-other"${hidden(abOther)}><input id="${pre}-abil-t" placeholder="Опишите способность" value="${esc(abOther ? p.abilities : '')}">
             <label class="sh-toggle"><input type="checkbox" id="${pre}-abil-v" ${abOther && p.abilityVisible ? 'checked' : ''}><span>Способность видна окружающим</span></label></div>
+          <button class="sh-link" data-act="loadAbilities" data-pre="${pre}"><i class="fa-solid fa-book"></i> ${(S()?.loreAbilities || []).length ? 'Обновить способности из лора' : 'Найти способности в лоре и карточке'}</button>
           <label>Курс<select id="${pre}-year">${Array.from({ length: MAX_YEAR }, (_, i) => `<option value="${i + 1}" ${+p.year === i + 1 ? 'selected' : ''}>${i + 1} курс</option>`).join('')}</select></label>`;
     }
     function readIdentity(pre, p) {
@@ -1166,7 +1282,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         p.species = sp === '__other' ? val(`${pre}-species-t`) : sp;
         const ab = val(`${pre}-abil`);
         if (ab === '__other') { p.abilities = val(`${pre}-abil-t`); p.abilityVisible = !!byId(`${pre}-abil-v`)?.checked; }
-        else { p.abilities = ab; p.abilityVisible = !!ABILITIES.find((a) => a.n === ab)?.v; }
+        else { p.abilities = ab; p.abilityVisible = !!(ABILITIES.find((a) => a.n === ab) || (S()?.loreAbilities || []).find((a) => a.n === ab))?.v; }
         p.year = clamp(parseInt(val(`${pre}-year`), 10) || 1, 1, MAX_YEAR);
     }
     function readAuth(s) {
@@ -1182,7 +1298,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     function personOf(s, name) {
         if (name === s.profile.name) return null;
         const post = s.feed.find((p) => p.author === name);
-        let species = post?.species || '';
+        let species = post?.species || lorePerson(s, name)?.species || '';
         if (!species) for (const p of s.feed) { const c = (p.comments || []).find((x) => x.author === name); if (c) { species = c.species; break; } }
         let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
         return { name, species, followers: 20 + (h % 900), following: s.social.following.includes(name) };
@@ -1215,7 +1331,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             }
             return p.channel === ui.channel;
         });
-        const authors = [...new Map(s.feed.filter((p) => !p.mine).map((p) => [p.author, p])).values()].slice(0, 12);
+        const authors = [...new Map([...lorePeople(s).map((p) => [p.name, { author: p.name }]), ...s.feed.filter((p) => !p.mine).map((p) => [p.author, p])]).values()].slice(0, 14);
         const chips = { ...CHANNELS, stories: 'Сюжеты', following: 'Подписки', mine: 'Мои посты' };
         if (ui.channel.startsWith('story:')) chips[ui.channel] = `📖 ${ui.channel.slice(6)}`;
         return `
@@ -1258,6 +1374,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         if (!pr) return meView(s);
         const posts = s.feed.filter((p) => p.author === name);
         return `${head(name)}
+        ${(() => { const lp = lorePerson(s, name); return lp ? `<div class="sh-note"><i class="fa-solid fa-book"></i><span>${badge('из лора')} ${esc(lp.bio)}${lp.faculty ? ` · ${esc(lp.faculty)}` : ''}</span></div>` : ''; })()}
         <div class="sh-card sh-person">${ava(name, true)}<div><b>${esc(name)}</b>${pr.species ? badge(pr.species) : ''}<small>${kfmt(pr.followers + (pr.following ? 1 : 0))} подписчиков · ${posts.length} постов</small></div></div>
         <div class="sh-row"><button class="sh-btn ${pr.following ? 'ghost' : ''}" data-act="follow" data-name="${esc(name)}">${pr.following ? 'Вы подписаны' : 'Подписаться'}</button>
         <button class="sh-btn ghost" data-act="dm" data-name="${esc(name)}" data-species="${esc(pr.species)}"><i class="fa-regular fa-paper-plane"></i> Личное сообщение</button></div>
@@ -1302,7 +1419,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         <div class="sh-row sh-card"><input id="sh-newchat" placeholder="Имя студента или преподавателя"><button class="sh-btn sm" data-act="newChat">Написать</button></div>
         ${list.length ? list.map((t) => {
         const last = t.msgs[t.msgs.length - 1];
-        return `<button class="sh-li" data-act="go" data-view="thread" data-param="${t.id}">${ava(t.name)}<div><b>${esc(t.name)}</b> ${t.kind === 'group' ? badge('группа') : t.species ? badge(t.species) : ''}<small>${last ? esc((last.me ? 'Вы: ' : '') + last.text).slice(0, 70) : 'Нет сообщений'}</small></div>${t.unread ? `<b class="sh-dot">${t.unread}</b>` : ''}</button>`;
+        return `<button class="sh-li" data-act="go" data-view="thread" data-param="${t.id}">${ava(t.name)}<div><b>${esc(t.name)}</b> ${t.kind === 'group' ? badge('группа') : t.kind === 'official' ? badge('официально', 'bad') : t.species ? badge(t.species) : ''}<small>${last ? esc((last.me ? 'Вы: ' : '') + last.text).slice(0, 70) : 'Нет сообщений'}</small></div>${t.unread ? `<b class="sh-dot">${t.unread}</b>` : ''}</button>`;
     }).join('') : empty('Диалогов пока нет. Напишите кому-нибудь из ленты или найдите пару в знакомствах.')}`;
     }
     function threadView(s, id) {
@@ -1311,7 +1428,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         th.unread = 0;
         const rl = relLabel(th), rv = Math.round(th.rel || 0);
         return `${head(th.name, `${th.species ? esc(th.species) + ', ' : ''}<i class="fa-solid fa-lock"></i> зашифровано`)}
-        ${th.kind === 'group' ? '' : `<div class="sh-rel"><div><small>${rl}${th.beef ? ' · бифф' : ''}${th.kind === 'char' && s.profile.relWithChar ? ' · вы пара' : ''}</small><div class="sh-relbar"><span class="${rv < 0 ? 'neg' : ''}" style="width:${Math.abs(rv) / 2}%;${rv < 0 ? 'right:50%' : 'left:50%'}"></span></div></div>
+        ${th.kind === 'group' || th.kind === 'official' ? '' : `<div class="sh-rel"><div><small>${rl}${th.beef ? ' · бифф' : ''}${th.kind === 'char' && s.profile.relWithChar ? ' · вы пара' : ''}</small><div class="sh-relbar"><span class="${rv < 0 ? 'neg' : ''}" style="width:${Math.abs(rv) / 2}%;${rv < 0 ? 'right:50%' : 'left:50%'}"></span></div></div>
           <button class="sh-btn sm ghost" data-act="go" data-view="meet" data-param="${th.id}"><i class="fa-solid fa-calendar-plus"></i> Встреча</button></div>`}
         ${th.pendingMeet ? `<div class="sh-card sh-pending"><b><i class="fa-solid fa-handshake"></i> Похоже, вы договорились о встрече</b>
           <small>${esc(KINDS[th.pendingMeet.kind])}, ${fmtWhen(th.pendingMeet.at)}, ${esc(PLACES[th.pendingMeet.place])}${th.pendingMeet.note ? ` (${esc(th.pendingMeet.note)})` : ''}</small>
@@ -1333,8 +1450,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         return `<h3 class="sh-h">Знакомства <small>только для студентов, профили верифицированы</small></h3>
         <div class="sh-seg"><button class="${d.mode === 'love' ? 'on' : ''}" data-act="dMode" data-mode="love">Свидания</button><button class="${d.mode === 'friends' ? 'on' : ''}" data-act="dMode" data-mode="friends">Друзья</button></div>
         <div class="sh-card sh-form">
-          <label>Вид<input id="sh-d-species" placeholder="любой" value="${esc(d.fSpecies)}"></label>
-          <label>Способности<input id="sh-d-abil" placeholder="любые" value="${esc(d.fAbility)}"></label>
+          <label>Вид<select id="sh-d-species">${speciesOptions(s, d.fSpecies, 'Любой вид')}</select></label>
+          <label>Способности<select id="sh-d-abil">${abilityOptions(s, d.fAbility, 'Любые способности')}</select></label>
           <button class="sh-btn" data-act="genDating"><i class="fa-solid fa-wand-magic-sparkles"></i> Подобрать анкеты</button>
         </div>
         ${d.matches.length ? `<h4>Взаимные симпатии</h4><div class="sh-stories">${d.matches.map((m) => `<button class="sh-story" data-act="dm" data-name="${esc(m.name)}" data-species="${esc(m.species)}" data-bio="${esc(m.bio)}">${ava(m.name, true)}<small>${esc(m.name.split(' ')[0])}</small></button>`).join('')}</div>` : ''}
@@ -1484,10 +1601,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     const MEET_ST = { accepted: ['запланирована', 'mid'], started: ['идёт сейчас', 'live'], done: ['состоялась', 'ok'], cancelled: ['отменена', 'mid'], missed: ['пропущена', 'bad'] };
     function meetCard(m, withActions) {
         const [st, cls] = MEET_ST[m.status] || ['', 'mid'];
-        return `<div class="sh-card"><b>${esc(KINDS[m.kind])} с ${esc(m.with)}</b> ${badge(st, cls)}
-          <small>${fmtWhen(m.at)}, ${esc(PLACES[m.place])}${m.note ? `, ${esc(m.note)}` : ''}</small>
+        return `<div class="sh-card ${m.kind === 'official' ? 'sh-official' : ''}"><b>${m.kind === 'official' ? `🏛️ Вызов: ${esc(m.with)}` : `${esc(KINDS[m.kind])} с ${esc(m.with)}`}</b> ${badge(st, cls)}
+          <small>${fmtWhen(m.at)}, ${esc(placeOf(m))}${m.note ? `, ${esc(m.note)}` : ''}</small>${m.kind === 'official' && m.status === 'accepted' ? '<small class="sh-bad-t">Отменить нельзя. Неявка — новое нарушение.</small>' : ''}
           ${m.caught ? `<small class="sh-bad-t">💔 Об этом узнали: ${esc(m.caught)}</small>` : ''}
-          ${withActions ? `<div class="sh-row">${m.status === 'accepted' ? `<button class="sh-btn sm" data-act="goMeet" data-id="${m.id}"><i class="fa-solid fa-person-walking"></i> Отправиться на встречу</button>` : ''}${m.status === 'started' ? `<button class="sh-btn sm" data-act="startScene" data-id="${m.id}">Начать сцену в чате</button>` : ''}${m.status === 'accepted' ? `<button class="sh-btn sm ghost" data-act="cancelMeet" data-id="${m.id}">Отменить</button>` : ''}</div>` : ''}</div>`;
+          ${withActions ? `<div class="sh-row">${m.status === 'accepted' ? `<button class="sh-btn sm" data-act="goMeet" data-id="${m.id}"><i class="fa-solid fa-person-walking"></i> Отправиться на встречу</button>` : ''}${m.status === 'started' ? `<button class="sh-btn sm" data-act="startScene" data-id="${m.id}">Начать сцену в чате</button>` : ''}${m.status === 'accepted' && m.kind !== 'official' ? `<button class="sh-btn sm ghost" data-act="cancelMeet" data-id="${m.id}">Отменить</button>` : ''}</div>` : ''}</div>`;
     }
     function meetingsView(s) {
         const up = s.meetings.filter((m) => m.status === 'accepted' || m.status === 'started').sort((a, b) => a.at - b.at);
@@ -1621,13 +1738,18 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
           ${num('checkInEarlyMin', 'Отметка до начала пары, мин')}${num('deadlineOffsetMin', 'Дедлайн до следующей пары, мин')}${num('extraTaskHours', 'Срок доп. задания, ч')}
           ${num('stipend', 'Стипендия, ₡')}${num('stipendMinGpa', 'Мин. балл для стипендии', 0.1)}${num('startBalance', 'Стартовый баланс (новые чаты), ₡')}</div>
         <button class="sh-btn ghost wide" data-act="go" data-view="log"><i class="fa-solid fa-bug"></i> Журнал ошибок (${LOG.length})</button>
+        <div class="sh-card"><h4>Люди из лора</h4>
+          ${lorePeople(s).length ? lorePeople(s).map((p) => `<div class="sh-li static">${ava(p.name)}<div><b>${esc(p.name)}</b><small>${esc([p.species, p.faculty, p.year ? `${p.year} курс` : ''].filter(Boolean).join(', '))}</small></div></div>`).join('') : '<p class="sh-muted">Студенты из лорбука и карточки ещё не найдены.</p>'}
+          ${lorePeople(s, 'staff').length ? `<small>Преподаватели и сотрудники: ${esc(lorePeople(s, 'staff').map((p) => p.name).join(', '))}</small>` : ''}
+          <small>Родители, родственники и люди вне университета в приложение не попадают.</small>
+          <button class="sh-btn sm ghost" data-act="refreshLorePeople"><i class="fa-solid fa-rotate"></i> Обновить из лора</button></div>
         <div class="sh-card sh-form"><h4>Мастер игры</h4><label>Установить баланс, ₡<input id="sh-gm-bal" type="number" value="${esc(s.wallet.balance)}"></label><button class="sh-btn sm ghost" data-act="gmBalance">Применить</button>
           <button class="sh-btn sm danger" data-act="resetChat">Сбросить данные UniHub в этом чате</button></div>`;
     }
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.9.1 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.10.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -1700,7 +1822,11 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     function openThread(s, name, species = '', bio = '', kind = 'dm') {
         name = String(name).trim();
         let th = s.threads.find((t) => t.name.toLowerCase() === name.toLowerCase());
-        if (!th) { th = { id: uid(), name, species, bio, kind, msgs: [], t: Date.now(), unread: 0 }; s.threads.unshift(th); }
+        if (!th) {
+            const lp = lorePerson(s, name);
+            th = { id: uid(), name, species: species || lp?.species || '', bio: [bio, lp ? `${lp.bio}${lp.abilities ? ` Способности: ${lp.abilities}.` : ''}${lp.relation ? ` Для ${ctx().name2}: ${lp.relation}.` : ''}` : ''].filter(Boolean).join(' '), kind, msgs: [], t: Date.now(), unread: 0 };
+            s.threads.unshift(th);
+        }
         ui.view = 'thread'; ui.param = th.id;
         save(s);
         return th;
@@ -1771,7 +1897,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             p.mine && cancelled(s) ? `Сейчас ${s.profile.name} «отменяют» в сети: большинство комментаторов настроены враждебно, лишь пара человек заступается.` : '',
         ].filter(Boolean).join('\n');
         const scoreFmt = scoreWhat ? `\nТакже оцени ${scoreWhat} ${s.profile.name}: authority (−5…5 — насколько это подняло авторитет ${s.profile.name}: остроумие, смелость, поддержка, интересная мысль — плюс; грубость, кринж, глупость — минус), controversy (0…10 — насколько спорно или токсично), sentiment (positive, mixed или negative — как восприняло сообщество). Реакция комментаторов должна соответствовать оценке.\nЕсли кто-то из комментаторов пообещал написать ${s.profile.name} в личку, начал договариваться с ней/ним о встрече или явно хочет продолжить разговор наедине — заполни followup: {"from":"имя этого комментатора","is_char":true если это ${ctx().name2} — персонаж основной истории, иначе false,"intent":"что он(а) напишет в личке — например, уточнит день, время и место встречи"}. Иначе followup: null.` : '';
-        const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${p.text}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
+        const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${p.text}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}${loreStudentsLine(s, 8)}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
         const arr = Array.isArray(r) ? r : (Array.isArray(r?.comments) ? r.comments : []);
         const list = arr.filter((c) => c && c.author && c.text && cleanName(c.author) !== s.profile.name).slice(0, 8).map((c) => ({
             id: uid(), author: cleanName(c.author), species: String(c.species || '').slice(0, 40), text: cleanMsg(c.text).slice(0, 400),
@@ -1858,6 +1984,36 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         clearLog: () => { LOG.length = 0; render(); },
 
         /* вход */
+        refreshLorePeople: (d, el, s) => withBusy('Читаю лорбук и карточку…', async () => {
+            const n = await extractLorePeople(s);
+            toast(n ? 'success' : 'info', n ? `Найдено студентов и сотрудников: ${n}` : 'В лоре не нашлось студентов этого университета.');
+        }),
+        loadAbilities: (d, el, s) => {
+            if (d.pre === 'sh-a') readAuth(s);
+            return withBusy('Ищу способности в лоре…', async () => {
+                const lore = await loreText(/способн|сил[аы]|магия|дар|ability|power|skill|магич|чары|заклин/i);
+                const r = await aiJSON(`${world(s)}\n\nЛор (лорбук и карточка):\n${lore || '(нет данных)'}\n\nВыпиши сверхъестественные способности, которые упоминаются в этом мире (в лоре, описании персонажа, сценарии). Только реально упомянутые, названия по-русски. visible — заметна ли способность окружающим со стороны (крылья, огонь в руках — да; телепатия — нет). Если ничего нет — пустой массив.\nФормат: [{"name":"способность","visible":false}]`);
+                const list = (Array.isArray(r) ? r : []).map((x) => typeof x === 'string' ? { n: cleanMsg(x).slice(0, 60), v: false } : { n: cleanMsg(x?.name || '').slice(0, 60), v: x?.visible === true }).filter((x) => x.n);
+                const seen = new Set(), uniq = list.filter((x) => !seen.has(x.n) && seen.add(x.n)).slice(0, 40);
+                if (!uniq.length) return toast('info', 'В лоре и карточке способности не найдены. Выберите из списка или впишите свою.');
+                s.loreAbilities = uniq;
+                toast('success', `Найдено способностей: ${uniq.length}. Они вверху списка «Способности».`);
+                save(s);
+            });
+        },
+        loadSpecies: (d, el, s) => {
+            if (d.pre === 'sh-a') readAuth(s);
+            return withBusy('Ищу виды в лоре…', async () => {
+                const lore = await loreText(/вид|раса|species|race|полулюд|демихьюман|demi|вампир|оборот|эльф|фейри|демон|существ|creature/i);
+                const r = await aiJSON(`${world(s)}\n\nЛор (лорбук и карточка):\n${lore || '(нет данных)'}\n\nВыпиши виды и расы разумных существ, которые упоминаются в этом мире (в лоре, описании персонажа, сценарии). Только те, что реально упомянуты, названия по-русски, как в мире. Если ничего нет — пустой массив.\nФормат: ["вид", "вид"]`);
+                const list = (Array.isArray(r) ? r : []).map((x) => cleanMsg(typeof x === 'string' ? x : x?.name || '').slice(0, 50)).filter(Boolean);
+                const uniq = [...new Set(list)].slice(0, 40);
+                if (!uniq.length) return toast('info', 'В лоре и карточке виды не найдены. Выберите из списка или впишите свой.');
+                s.loreSpecies = uniq;
+                toast('success', `Найдено видов: ${uniq.length}. Они вверху списка «Вид».`);
+                save(s);
+            });
+        },
         loadFac: (d, el, s) => { readAuth(s); return withBusy('Ищу факультеты в лоре…', async () => { s.faculties = await loadFaculties(s); save(s); }); },
         pickFac: (d, el, s) => { readAuth(s); s.profile.faculty = s.faculties[+d.i]?.name || ''; const f = byId('sh-a-fac'); if (f) f.value = ''; save(s); render(); },
         login: (d, el, s) => {
@@ -1870,6 +2026,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             s.profile.faculty = fac;
             return withBusy('Составляю расписание…', async () => {
                 s.schedule = await genSchedule(s, fac);
+                enqueue(s, async () => { const n = await extractLorePeople(s); if (n) notify(s, `👥 В UniHub появились студенты из вашего мира: ${n}`, 'important'); });
                 s.auth = true; s.enforceFrom = NOW(); s.quarter = { n: 1, start: NOW() };
                 s.expelled = false; s.expelReason = '';
                 const c = ctx();
@@ -2022,7 +2179,7 @@ ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species}
         startScene: (d, el, s) => {
             const m = s.meetings.find((x) => x.id === d.id);
             if (!m) return;
-            fillChatInput(`*${s.profile.name} идёт на встречу с ${m.with} — ${PLACES[m.place]}${m.note ? `, ${m.note}` : ''}.*`);
+            fillChatInput(`*${s.profile.name} идёт на встречу с ${m.with} — ${placeOf(m)}${m.note ? `, ${m.note}` : ''}.*`);
             toast('info', 'Начало сцены вставлено в поле ввода чата.');
             toggle(false);
         },
@@ -2096,7 +2253,7 @@ ${story}
             if (!m || m.status !== 'accepted') return;
             if (gameMode(s) && s.clock.t < m.at) setClock(s, m.at, 'на встречу');
             if (m.status === 'accepted') startMeeting(s, m);
-            fillChatInput(`*${s.profile.name} отправляется на встречу с ${m.with} — ${PLACES[m.place]}${m.note ? `, ${m.note}` : ''}.*`);
+            fillChatInput(m.kind === 'official' ? `*${s.profile.name} идёт по вызову к ${m.with} — ${placeOf(m)}.*` : `*${s.profile.name} отправляется на встречу с ${m.with} — ${placeOf(m)}${m.note ? `, ${m.note}` : ''}.*`);
             save(s); toggle(false);
         },
         goEvent: (d, el, s) => {
@@ -2130,7 +2287,7 @@ ${story}
             const act = s.stories.filter((x) => now - x.updated < 5 * DAY).slice(-4);
             const storyTxt = act.map((x) => `- «${x.title}» (участники: ${x.cast.join(', ')}): ${x.summary}${x.userActs?.length ? ` Вмешательство ${name}: ${x.userActs.slice(-3).join(' | ')}` : ''}`).join('\n');
             const rels = s.threads.filter((t) => t.kind !== 'group' && (Math.abs(t.rel || 0) >= 40 || (t.flirt || 0) >= 3)).slice(0, 6).map((t) => `${t.name} — ${relLabel(t)}`).join('; ');
-            const r = await aiJSON(`${world(s)}\n\nСгенерируй 6 свежих публикаций в ленту UniHub от разных студентов разных видов. Весь текст на русском, включая названия видов (имена могут быть любыми). Каналы: general, study, clubs, dorms, species.${s.profile.species ? ` Минимум 1 пост от вида «${s.profile.species}» в канал species.` : ''}
+            const r = await aiJSON(`${world(s)}\n\nСгенерируй 6 свежих публикаций в ленту UniHub от разных студентов разных видов.${loreStudentsLine(s)} Весь текст на русском, включая названия видов (имена могут быть любыми). Каналы: general, study, clubs, dorms, species.${s.profile.species ? ` Минимум 1 пост от вида «${s.profile.species}» в канал species.` : ''}
 Лента живая: студенты общаются МЕЖДУ СОБОЙ. 3–4 поста — сюжетные линии: продолжение активных сюжетов (ссоры, романы, соперничество, розыгрыши, расследования, сплетни) или начало нового. Участники отвечают друг другу постами и упоминают друг друга через @Имя, сюжет развивается от ленты к ленте. Персонажи сюжетов реагируют на вмешательство ${name}.
 ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `Отношения ${name} в UniHub (могут всплывать в ленте — биффы, флирт, сплетни): ${rels}\n` : ''}${cancelled(s) ? `Сейчас ${name} «отменяют» в сети — это активно обсуждают.\n` : ''}1–2 поста могут обсуждать ${name}: реакцию на вид и способности по правилам выше.
 Формат: {"posts":[{"author":"Имя","species":"вид","channel":"general","text":"до 300 символов","media":"описание фото или видео, либо пустая строка","kind":"photo|video|reel|story","likes":12,"verified":true,"story":"название сюжета или пустая строка"}],"stories":[{"title":"название сюжета","cast":["Имя","Имя"],"summary":"что происходит сейчас, 1–2 предложения"}]}`);
@@ -2171,8 +2328,9 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
         genDating: (d, el, s) => {
             const dt = s.dating;
             dt.fSpecies = val('sh-d-species'); dt.fAbility = val('sh-d-abil');
+            dt.profiles = [];
             return withBusy('Подбираю анкеты…', async () => {
-                const r = await aiJSON(`${world(s)}\n\nСгенерируй 5 анкет студентов этого университета для ${dt.mode === 'friends' ? 'поиска друзей' : 'романтических знакомств'} в UniHub. Вид пользователя: ${s.profile.species || 'не указан'}. Фильтры: вид — ${dt.fSpecies || 'любой'}; способности — ${dt.fAbility || 'любые'}. Оцени межвидовую совместимость с пользователем (compat 0–100) и коротко объясни.\nФормат: [{"name":"Имя","age":20,"species":"","faculty":"","abilities":"","bio":"до 200 символов","compat":75,"compatNote":"одно предложение","verified":true}]`);
+                const r = await aiJSON(`${world(s)}\n\n${loreStudentsLine(s)}\nЕсли среди студентов из лора есть подходящие под фильтры — включи 1–2 из них с их настоящими данными, остальных придумай.\nСгенерируй 5 анкет студентов этого университета для ${dt.mode === 'friends' ? 'поиска друзей' : 'романтических знакомств'} в UniHub. Вид пользователя: ${s.profile.species || 'не указан'}. Фильтры: вид — ${dt.fSpecies || 'любой'}; способности — ${dt.fAbility === NO_ABIL ? 'без сверхъестественных способностей' : dt.fAbility || 'любые'}. Оцени межвидовую совместимость с пользователем (compat 0–100) и коротко объясни.\nФормат: [{"name":"Имя","age":20,"species":"","faculty":"","abilities":"","bio":"до 200 символов","compat":75,"compatNote":"одно предложение","verified":true}]`);
                 if (!Array.isArray(r) || !r.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
                 dt.profiles = r.filter((p) => p && p.name).map((p) => ({ id: uid(), name: String(p.name).slice(0, 40), age: parseInt(p.age, 10) || 19, species: String(p.species || '').slice(0, 40), faculty: String(p.faculty || '').slice(0, 60), abilities: String(p.abilities || '').slice(0, 120), bio: String(p.bio || '').slice(0, 300), compat: clamp(parseInt(p.compat, 10) || 50, 0, 100), compatNote: String(p.compatNote || '').slice(0, 160), verified: p.verified !== false }));
                 save(s);
@@ -2592,6 +2750,8 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
 
     function onChatChanged() {
         ui.view = null; ui.param = null; lastKey = '';
+        const s0 = S();
+        if (s0 && s0.auth && !s0.lorePeopleAt) enqueue(s0, async () => { const n = await extractLorePeople(s0); if (n) notify(s0, `👥 В UniHub появились студенты из вашего мира: ${n}`, 'important'); });
         tick();
         updateInjection();
         render();

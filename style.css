@@ -348,3 +348,5 @@
 #unihub-phone .sh-col { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
 
 #unihub-phone .sh-typing { color: var(--sh-amber) !important; font-style: italic; }
+
+#unihub-phone .sh-official { border-color: rgba(239, 95, 118, .5); }
