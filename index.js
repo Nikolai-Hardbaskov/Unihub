@@ -132,6 +132,18 @@
         { title: 'Сырая морская тарелка', place: 'Русалочья лавка', price: 200, tags: ['рыба', 'сырое'] },
         { title: 'Эмоции в банке: радость', place: 'Эмпат-маркет', price: 250, tags: ['эмоции'] },
         { title: 'Двойной эспрессо', place: 'Кофейня у библиотеки', price: 80, tags: ['обычное', 'веган'] },
+        { title: 'Кровяной латте', place: 'Бар «Ночная смена»', price: 160, tags: ['кровь'] },
+        { title: 'Тёплая кровь с корицей', place: 'Бар «Ночная смена»', price: 170, tags: ['кровь'] },
+        { title: 'Карпаччо из оленины', place: 'Столовая №1', price: 240, tags: ['мясо', 'сырое'] },
+        { title: 'Рёбрышки на гриле', place: 'Столовая №1', price: 230, tags: ['мясо'] },
+        { title: 'Салат из лесных трав', place: 'Кафе «Фея»', price: 120, tags: ['веган'] },
+        { title: 'Медовые соты с росой', place: 'Кафе «Фея»', price: 110, tags: ['нектар', 'веган'] },
+        { title: 'Туманный чай', place: 'Спектр-бар', price: 90, tags: ['эктоплазма'] },
+        { title: 'Лавовые угольки', place: 'Кухня «Преисподняя»', price: 140, tags: ['огнеупорное'] },
+        { title: 'Эмоции в банке: восторг', place: 'Эмпат-маркет', price: 280, tags: ['эмоции'] },
+        { title: 'Устрицы и водоросли', place: 'Русалочья лавка', price: 210, tags: ['рыба', 'сырое'] },
+        { title: 'Пицца с пепперони', place: 'Столовая №1', price: 180, tags: ['обычное'] },
+        { title: 'Круассан', place: 'Кофейня у библиотеки', price: 70, tags: ['обычное'] },
     ];
     const DEFAULT_MARKET = [
         { title: '«Анатомия нежити», 3-е изд.', cat: 'Учебники', price: 450, rent: 80, seller: 'Ирвин Кроу', rating: 4.8, verified: true },
@@ -185,6 +197,18 @@
         { title: 'Сет роллов', place: 'Суши-бар', price: 350, tags: ['рыба'] },
         { title: 'Сэндвич без глютена', place: 'Зелёная кухня', price: 170, tags: ['без глютена'] },
         { title: 'Плов', place: 'Столовая №2', price: 170, tags: ['халяль'] },
+        { title: 'Латте', place: 'Кофейня у библиотеки', price: 100, tags: ['кофе'] },
+        { title: 'Раф ванильный', place: 'Кофейня у библиотеки', price: 120, tags: ['кофе'] },
+        { title: 'Айс-латте с карамелью', place: 'Кофейня у библиотеки', price: 130, tags: ['кофе'] },
+        { title: 'Синнабон', place: 'Кофейня у библиотеки', price: 110, tags: ['выпечка'] },
+        { title: 'Сырники со сметаной', place: 'Столовая №1', price: 140, tags: ['завтраки', 'вегетарианское'] },
+        { title: 'Омлет с беконом', place: 'Столовая №1', price: 150, tags: ['завтраки'] },
+        { title: 'Пицца «Пепперони»', place: 'Пиццерия «Кампус»', price: 260, tags: ['обычное'] },
+        { title: 'Бургер с картошкой', place: 'Гриль «Квадрат»', price: 250, tags: ['обычное'] },
+        { title: 'Цезарь с курицей', place: 'Зелёная кухня', price: 200, tags: ['обычное'] },
+        { title: 'Фалафель-ролл', place: 'Зелёная кухня', price: 170, tags: ['веганское', 'халяль'] },
+        { title: 'Рамен с курицей', place: 'Суши-бар', price: 260, tags: ['обычное'] },
+        { title: 'Чизкейк', place: 'Кофейня у библиотеки', price: 150, tags: ['выпечка', 'вегетарианское'] },
     ];
     const MUNDANE_MARKET = [
         { title: 'Учебник «Микроэкономика»', cat: 'Учебники', price: 450, rent: 70, seller: 'Ира, 3 курс', rating: 4.8, verified: true },
@@ -668,9 +692,10 @@ task — если назначена письменная отработка; ap
         const c = cfg(), now = Date.now(), gnow = NOW();
         let ch = false;
 
-        for (const o of s.orders) if (!o.notified && now >= o.eta) {
+        for (const o of s.orders) {
+            if (o.notified || o.kind === 'food' || gnow < o.eta) continue;
             o.notified = true; ch = true;
-            notify(s, o.kind === 'parcel' ? `📦 Посылка для ${o.to} доставлена.` : `🍽️ Заказ «${o.title}» доставлен.`);
+            notify(s, `📦 Посылка для ${o.to} доставлена.`);
         }
         for (const l of s.listings) if (!l.sold && Math.random() < 1 / 240) {
             l.sold = true; ch = true;
@@ -1200,6 +1225,18 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
     let syncing = false;
     /** После каждого ответа истории: Horae → определение ИИ → шаг по умолчанию. */
+    function onStoryReply() {
+        const s = S(), chat = ctx().chat || [];
+        const last = chat[chat.length - 1];
+        if (!s || !s.auth || !last || last.is_user || last.is_system) return;
+        s.replyCount = (s.replyCount || 0) + 1;
+        for (const o of s.orders) {
+            if (o.kind !== 'food' || o.stage === 'delivered' || !o.injected) continue;
+            o.stage = 'delivered'; o.notified = true;
+            notify(s, `🍽️ Заказ доставлен: ${o.title}`, 'info', { view: 'delivery' });
+        }
+        save(s);
+    }
     async function onStoryMessage() {
         const s = S();
         if (!s || !s.auth || !gameMode(s) || syncing) return;
@@ -1343,6 +1380,11 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         if (others.length) L.push(`Для рассказчика — отношения ${p.name} с другими студентами по UniHub (учитывай, только если этот человек появится в сцене; ${ctr ? ctr.name : 'другие персонажи'} об этом не знает, если не был свидетелем и ему не рассказали): ${others.map((t) => `${t.name} — ${t.conflict || t.beef ? `в ссоре с ${p.name}${t.conflict ? ` (${t.conflict.why})` : ''}` : relLabel(t)}`).join('; ')}.`);
         const beefs = s.threads.filter((t) => t.beef);
         if (beefs.length) L.push(`Общеизвестно в кампусе: публичный бифф в UniHub между ${p.name} и ${beefs.map((t) => t.name).join(', ')} — студенты это обсуждают, об этом может знать кто угодно.`);
+        const arriving = s.orders.filter((o) => o.kind === 'food' && o.stage !== 'delivered' && (o.dueReply !== undefined ? (s.replyCount || 0) + 1 >= o.dueReply : Date.now() >= o.eta));
+        if (arriving.length) {
+            for (const o of arriving) o.injected = true;
+            L.push(`ДОСТАВКА — ОБЯЗАТЕЛЬНО В ЭТОМ ОТВЕТЕ: курьер UniHub приносит ${p.name} заказ: ${arriving.map((o) => `${o.title}${o.place ? ` (из: ${o.place})` : ''}`).join('; ')}. Доставка приходит туда, где ${p.name} находится прямо сейчас по сцене (комната, аудитория, двор, кафе и т.д.): курьер${mundane(s) ? '' : ' или доставщик в духе этого мира'} появляется, называет заказ и передаёт его. Впиши это естественно в текущую сцену, не обрывая её.`);
+        }
         const so = soc(s), nowT = NOW();
         L.push(`Популярность ${p.name} в UniHub (публично видно): уровень ${levelOf(so)}, ${kfmt(so.followers)} подписчиков.${cancelled(s) ? ` Сейчас ${p.name} «отменяют» в сети — многие студенты настроены враждебно и обсуждают это.` : ''}`);
         for (const m of s.meetings) {
@@ -1866,22 +1908,81 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         <button class="sh-btn danger wide" data-act="sos"><i class="fa-solid fa-shield-halved"></i> Экстренный вызов охраны кампуса</button>`;
     }
 
-    function orderStatus(o) {
-        const p = (Date.now() - o.t) / (o.eta - o.t);
+    function orderStatus(o, s) {
+        if (o.kind === 'food' && o.dueReply !== undefined) {
+            if (o.stage === 'delivered') return ['Доставлено', 100];
+            const leftN = o.dueReply - (s?.replyCount || 0);
+            if (leftN >= 2) return ['Готовится — доставят через одно сообщение истории', 30];
+            if (leftN === 1) return ['Курьер в пути — доставят в следующем сообщении истории', 70];
+            return ['Курьер у вас — доставка в этом ответе истории', 95];
+        }
+        const p = (NOW() - o.t) / (o.eta - o.t);
         if (p >= 1) return ['Доставлено', 100];
         if (p < 0.3) return [o.kind === 'parcel' ? 'Курьер забирает' : 'Готовится', Math.round(p * 100)];
         return ['Курьер в пути', Math.round(p * 100)];
+    }
+    /** Разбор свободного заказа: «2 капучино, круассан, пицца маргарита». */
+    function parseOrder(s, text) {
+        const stem = (w) => w.toLowerCase().replace(/[«»"'().,!]/g, '').slice(0, 5);
+        const words = (t) => String(t).toLowerCase().replace(/[«»"'()]/g, ' ').split(/[\s-]+/).filter((w) => w.length >= 3).map(stem);
+        const lines = [], missing = [];
+        for (let part of String(text).split(/[,;\n]+/)) {
+            part = part.trim();
+            if (!part) continue;
+            let qty = 1;
+            let m = /^(\d+)\s*(шт\.?|x|х|×)?\s+/i.exec(part);
+            if (m) { qty = +m[1]; part = part.slice(m[0].length); }
+            else if ((m = /\s*(x|х|×)\s*(\d+)\s*$/i.exec(part))) { qty = +m[2]; part = part.slice(0, m.index); }
+            qty = clamp(qty, 1, 20);
+            const low = part.toLowerCase(), pw = words(part);
+            let best = null, bestScore = 0;
+            for (const it of s.menu) {
+                const t = it.title.toLowerCase();
+                let score = t.includes(low) || low.includes(t) ? 10 : 0;
+                const tw = words(it.title);
+                score += pw.filter((w) => tw.includes(w)).length * 2;
+                if (score > bestScore) { bestScore = score; best = it; }
+            }
+            if (best && bestScore >= Math.min(2, pw.length * 2)) {
+                const ex = lines.find((l) => l.item.id === best.id);
+                if (ex) ex.qty += qty; else lines.push({ item: best, qty });
+            } else missing.push(part);
+        }
+        return { lines, missing, total: lines.reduce((a, l) => a + l.item.price * l.qty, 0) };
+    }
+    function orderPreview(s, text) {
+        if (!String(text).trim()) return '';
+        const { lines, missing, total } = parseOrder(s, text);
+        return `${lines.map((l) => `<div class="sh-oline"><span>${l.qty > 1 ? `${l.qty} × ` : ''}${esc(l.item.title)}</span><b>${money(l.item.price * l.qty)}</b></div>`).join('')}
+          ${missing.length ? `<small class="sh-bad-t">Нет в меню: ${esc(missing.join(', '))}</small>` : ''}
+          ${lines.length ? `<div class="sh-oline total"><span>Итого</span><b>${money(total)}</b></div>` : ''}`;
+    }
+    /** Оформляет заказ еды: доставка в историю через 1–2 ответа (в режиме времени истории). */
+    function placeFoodOrder(s, lines) {
+        const total = lines.reduce((a, l) => a + l.item.price * l.qty, 0);
+        const title = lines.map((l) => `${l.qty > 1 ? `${l.qty} × ` : ''}${l.item.title}`).join(', ');
+        if (!pay(s, total, `Доставка: ${title}`)) { render(); return false; }
+        const now = NOW();
+        const places = [...new Set(lines.map((l) => l.item.place).filter(Boolean))].join(', ');
+        const o = { id: uid(), kind: 'food', title, place: places, price: total, t: now, eta: now + (15 + Math.floor(Math.random() * 20)) * MIN, stage: 'cooking' };
+        if (gameMode(s)) o.dueReply = (s.replyCount || 0) + (Math.random() < 0.5 ? 1 : 2);
+        s.orders.unshift(o);
+        questEvent(s, 'order');
+        toast('success', `Заказ оформлен: ${title} — ${money(total)}.${gameMode(s) ? ` Доставят ${o.dueReply - (s.replyCount || 0) === 1 ? 'в следующем сообщении' : 'через одно сообщение'} истории.` : ''}`);
+        save(s); render();
+        return true;
     }
     function deliveryView(s) {
         const tags = [...new Set(s.menu.flatMap((m) => m.tags || []))];
         const items = s.menu.filter((m) => ui.diet === 'all' || (m.tags || []).includes(ui.diet));
         return `${head('Доставка по кампусу')}
+        <div class="sh-card sh-form"><h4>Свой заказ</h4><textarea id="sh-o-text" rows="2" placeholder="Через запятую: 2 капучино, круассан, пицца маргарита"></textarea><div id="sh-o-prev" class="sh-opreview"></div><button class="sh-btn sm" data-act="orderText">Заказать</button></div>
         <div class="sh-chips"><button class="sh-chip ${ui.diet === 'all' ? 'on' : ''}" data-act="diet" data-diet="all">Всё</button>${tags.map((t) => `<button class="sh-chip ${ui.diet === t ? 'on' : ''}" data-act="diet" data-diet="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-        ${items.map((m) => `<div class="sh-li static"><div><b>${esc(m.title)}</b><small>${esc(m.place)}. ${(m.tags || []).map((t) => esc(t)).join(', ')}</small></div><button class="sh-btn sm" data-act="order" data-id="${m.id}">${money(m.price)}</button></div>`).join('')}
+        ${items.map((m) => `<div class="sh-li static"><div><b>${esc(m.title)}</b>${m.wishedBy ? badge(`💭 хотел(а) ${m.wishedBy}`, 'fac') : ''}<small>${esc(m.place)}. ${(m.tags || []).map((t) => esc(t)).join(', ')}</small></div><button class="sh-btn sm" data-act="order" data-id="${m.id}">${money(m.price)}</button></div>`).join('')}
         <button class="sh-btn ghost wide" data-act="genMenu"><i class="fa-solid fa-rotate"></i> Обновить меню</button>
         <div class="sh-card sh-form"><h4>Посылка другому студенту</h4><label>Кому<input id="sh-p-to"></label><label>Что внутри<input id="sh-p-what"></label><button class="sh-btn sm" data-act="parcel">Отправить за ${money(60)}</button></div>
         <h4>Отслеживание</h4>
-        ${s.orders.length ? s.orders.slice(0, 15).map((o) => { const [st, p] = orderStatus(o); return `<div class="sh-card"><b>${o.kind === 'parcel' ? `📦 Для ${esc(o.to)}: ${esc(o.title)}` : `🍽️ ${esc(o.title)}`}</b><small class="sh-muted">${st}, прибытие ~${fmtT(o.eta)}</small><div class="sh-bar"><span style="width:${p}%"></span></div></div>`; }).join('') : empty('Заказов пока нет.')}`;
+        ${s.orders.length ? s.orders.slice(0, 15).map((o) => { const [st, p] = orderStatus(o, s); return `<div class="sh-card"><b>${o.kind === 'parcel' ? `📦 Для ${esc(o.to)}: ${esc(o.title)}` : `🍽️ ${esc(o.title)}`}</b><small class="sh-muted">${esc(st)}${o.dueReply === undefined && o.stage !== 'delivered' ? `, прибытие ~${fmtT(o.eta)}` : ''}${o.price ? ` · ${money(o.price)}` : ''}</small><div class="sh-bar"><span style="width:${p}%"></span></div></div>`; }).join('') : empty('Заказов пока нет.')}`;
     }
 
     function marketView(s) {
@@ -1988,7 +2089,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.13.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.14.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2758,27 +2859,33 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
         diet: (d) => { ui.diet = d.diet; render(); },
         order: (d, el, s) => {
             const m = s.menu.find((x) => x.id === d.id);
-            if (!m || !pay(s, m.price, `Доставка: ${m.title}`)) return render();
-            const now = Date.now();
-            questEvent(s, 'order');
-            s.orders.unshift({ id: uid(), kind: 'food', title: m.title, price: m.price, t: now, eta: now + (20 + Math.floor(Math.random() * 25)) * MIN });
-            toast('success', `Заказ «${m.title}» оформлен.`);
-            save(s); render();
+            if (m) placeFoodOrder(s, [{ item: m, qty: 1 }]);
+        },
+        orderText: (d, el, s) => {
+            const text = val('sh-o-text');
+            const { lines, missing } = parseOrder(s, text);
+            if (!lines.length) return toast('warning', missing.length ? `Этого нет в меню: ${missing.join(', ')}. Обновите меню или выберите из списка.` : 'Впишите, что хотите заказать, через запятую.');
+            if (missing.length && !confirm(`Этого нет в меню, оно не войдёт в заказ: ${missing.join(', ')}. Заказать остальное?`)) return;
+            if (placeFoodOrder(s, lines)) { const e = byId('sh-o-text'); if (e) e.value = ''; render(); }
         },
         parcel: (d, el, s) => {
             const to = val('sh-p-to'), what = val('sh-p-what');
             if (!to || !what) return toast('warning', 'Укажите получателя и содержимое.');
             if (!pay(s, 60, `Посылка для ${to}`)) return render();
-            const now = Date.now();
+            const now = NOW();
             s.orders.unshift({ id: uid(), kind: 'parcel', to, title: what, price: 60, t: now, eta: now + (40 + Math.floor(Math.random() * 50)) * MIN });
             toast('success', 'Посылка отправлена.');
             save(s); render();
         },
         genMenu: (d, el, s) => withBusy('Обновляю меню…', async () => {
-            const r = await aiJSON(`${world(s)}\n\n${mundane(s) ? 'Составь 10 позиций меню доставки по кампусу обычного университета: кофе, выпечка, ланчи, пицца, суши, веганское, халяль, без глютена и т.п. Реалистичные кафе и столовые, цены в ₡ от 60 до 400.' : 'Составь 10 позиций меню доставки по кампусу для разных видов (кровь, сырое мясо, веган, нектар, эктоплазма, эмоции, огнеупорная еда, обычная еда и т.п.). Кафе и точки должны звучать как места этого университета.'}\nФормат: [{"title":"","place":"","price":150,"tags":["веган"]}] — теги короткие, строчными буквами.`);
+            const story = recentStory(15);
+            const r = await aiJSON(`${world(s)}\n\n${mundane(s) ? 'Составь меню доставки по кампусу обычного университета: кофе и напитки, выпечка и десерты, завтраки, ланчи, пицца, суши и азиатское, веганское, халяль, без глютена и т.п. Реалистичные кафе и столовые, цены в ₡ от 60 до 400.' : 'Составь меню доставки по кампусу для разных видов (кровь, сырое мясо, веган, нектар, эктоплазма, эмоции, огнеупорная еда, обычная еда и т.п.). Кафе и точки должны звучать как места этого университета.'}
+Нужно 28–32 позиции. Выбери 6–8 категорий (теги) и сделай в КАЖДОЙ категории минимум 4 позиции; у позиции 1–2 тега из этого набора. Названия блюд на русском.
+${story ? `Последние события истории:\n${story}\nЕсли в истории ${ctx().name2} или кто-то из студентов упоминал, что хочет съесть или выпить что-то конкретное, — обязательно добавь это в меню (в подходящее кафе) и укажи wishedBy: имя того, кто хотел.\n` : ''}Формат: [{"title":"","place":"","price":150,"tags":["веган"],"wishedBy":""}] — теги короткие, строчными буквами.`);
             const list = Array.isArray(r) ? r.filter((m) => m && m.title && +m.price > 0) : [];
             if (!list.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
-            s.menu = list.map((m) => ({ id: uid(), title: String(m.title).slice(0, 80), place: String(m.place || '').slice(0, 60), price: Math.round(+m.price), tags: (Array.isArray(m.tags) ? m.tags : []).map((t) => String(t).toLowerCase().slice(0, 20)).slice(0, 4) }));
+            s.menu = list.map((m) => ({ id: uid(), title: cleanMsg(m.title).slice(0, 80), place: cleanMsg(m.place || '').slice(0, 60), price: Math.round(+m.price), tags: (Array.isArray(m.tags) ? m.tags : []).map((t) => String(t).toLowerCase().slice(0, 20)).slice(0, 3), wishedBy: cleanName(m.wishedBy || '') }));
+            s.menu.sort((a, b) => (b.wishedBy ? 1 : 0) - (a.wishedBy ? 1 : 0));
             ui.diet = 'all';
             save(s);
         }),
@@ -2991,6 +3098,11 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
         ph.dataset.theme = THEMES[cfg().theme] ? cfg().theme : 'pearl';
         ph.addEventListener('click', onClick);
         ph.addEventListener('change', onChange);
+        ph.addEventListener('input', (e) => {
+            if (e.target?.id !== 'sh-o-text') return;
+            const s = S(), box = byId('sh-o-prev');
+            if (s && box) box.innerHTML = orderPreview(s, e.target.value);
+        });
         ph.addEventListener('keydown', onKey);
         document.body.appendChild(ph);
 
@@ -3051,7 +3163,8 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
         mount();
         const { eventSource, event_types } = ctx();
         eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-        if (event_types.MESSAGE_RECEIVED) eventSource.on(event_types.MESSAGE_RECEIVED, () => { onStoryMessage().catch((e) => logErr('Часы истории', e)); });
+        if (event_types.MESSAGE_RECEIVED) eventSource.on(event_types.MESSAGE_RECEIVED, () => { try { onStoryReply(); } catch (e) { logErr('Доставка', e); } onStoryMessage().catch((e) => logErr('Часы истории', e)); });
+        if (event_types.GENERATION_STARTED) eventSource.on(event_types.GENERATION_STARTED, () => { try { updateInjection(); } catch (e) { logErr('Инъекция', e); } });
         setInterval(() => {
             try { tick(); } catch (e) { logErr('Таймер', e); }
             updateInjection();
