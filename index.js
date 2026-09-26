@@ -285,8 +285,23 @@
         saveTimer = setTimeout(() => { try { ctx().saveMetadata?.(); } catch (e) { logErr('[UniHub] save', e); } }, 400);
     }
 
-    function notify(s, text, type = 'info') {
-        s.notes.unshift({ id: uid(), text, type, t: Date.now(), read: false });
+    // куда ведёт уведомление, если место не указано явно — по смыслу текста
+    const NOTE_ROUTES = [
+        [/^(📚|⌛ Доп|✅ «|🩹)|доп\. задание|просроченное задание/i, { tab: 'study', studyTab: 'tasks' }],
+        [/^(⚠️|📉|📈|⛔)|четверть/i, { tab: 'study', studyTab: 'rating' }],
+        [/^(✅ Вы|📝)/, { tab: 'study', studyTab: 'schedule' }],
+        [/^(🎯|🏆|⬆️|⌛ Задание|📊|🔥|🚫|🌤️)|подписал/i, { view: 'me' }],
+        [/^(📅|⏰|😶|❌ Встреча|💔)/, { view: 'meetings' }],
+        [/^(📦|🍽️)/, { view: 'delivery' }],
+        [/^💰/, { view: 'market' }],
+        [/^🎓 Начислена/, { view: 'wallet' }],
+        [/^👥 В UniHub появились/, { view: 'settings' }],
+        [/^💘/, { tab: 'dating' }],
+        [/^🕰️/, { view: 'clock' }],
+    ];
+    function notify(s, text, type = 'info', go = null) {
+        if (!go) go = (NOTE_ROUTES.find(([re]) => re.test(text)) || [])[1] || null;
+        s.notes.unshift({ id: uid(), text, type, t: Date.now(), read: false, go });
         if (s.notes.length > 120) s.notes.length = 120;
         if (type !== 'social') toast({ warn: 'warning', bad: 'error', important: 'info', info: 'success' }[type] || 'info', text);
     }
@@ -644,7 +659,7 @@ task — если назначена письменная отработка; ap
             s.meetings.push({ id: uid(), with: from, threadId: th.id, kind: 'official', place: 'custom', placeText: cleanMsg(r.appointment.place || 'кабинет администрации').slice(0, 80), note: '', at, status: 'accepted', created: Date.now() });
             extras.push(`явка ${fmtWhen(at)}`);
         }
-        notify(s, `🏛️ ${from}: ${k.consequence}${extras.length ? ` (${extras.join(', ')})` : ''}`, 'warn');
+        notify(s, `🏛️ ${from}: ${k.consequence}${extras.length ? ` (${extras.join(', ')})` : ''}`, 'warn', { view: 'thread', param: th.id });
     }
 
     function tick() {
@@ -679,7 +694,7 @@ task — если назначена письменная отработка; ap
             if ((p.likes || 0) >= 200) questEvent(s, 'likes');
             for (const c of p.comments || []) if (c.at && c.at <= now && !c.seen) {
                 c.seen = true; ch = true;
-                if (!(ui.open && ui.view === 'post' && ui.param === p.id)) notify(s, `💬 ${c.author}: ${c.text.slice(0, 60)}`, 'social');
+                if (!(ui.open && ui.view === 'post' && ui.param === p.id)) notify(s, `💬 ${c.author}: ${c.text.slice(0, 60)}`, 'social', { view: 'post', param: p.id });
             }
             const age = now - p.t;
             if (age < 2 * DAY) {
@@ -823,12 +838,12 @@ task — если назначена письменная отработка; ap
                 if (!th) { th = { id: uid(), name: who, species: sp, bio: String(h.intent || '').slice(0, 200), kind: 'dm', msgs: [], t: Date.now(), unread: 0, rel: 0 }; s.threads.unshift(th); }
                 th.msgs.push({ me: false, text: cleanMsg(txt).slice(0, 500), t: Date.now() });
                 th.unread = (th.unread || 0) + 1; th.t = Date.now();
-                notify(s, `💬 ${who}: ${cleanMsg(txt).slice(0, 70)}`, 'important');
+                notify(s, `💬 ${who}: ${cleanMsg(txt).slice(0, 70)}`, 'important', { view: 'thread', param: th.id });
             } else if (h.type === 'post') {
                 const txt = await aiText(`${base}\n\nТеперь ${who}${sp ? ` (${sp})` : ''} публикует пост в ленте UniHub, откликаясь на это. До 280 символов, живо, по-русски, только текст поста.`);
                 if (!txt) return;
                 s.feed.unshift({ id: uid(), author: who, species: sp, channel: 'general', text: cleanMsg(txt).slice(0, 500), likes: 5 + Math.floor(Math.random() * 60), t: Date.now(), comments: [] });
-                notify(s, `📰 ${who} опубликовал(а) пост — кажется, это про вас`, 'important');
+                notify(s, `📰 ${who} опубликовал(а) пост — кажется, это про вас`, 'important', { view: 'post', param: s.feed[0]?.id });
             }
         });
     }
@@ -965,13 +980,13 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             if (!th.conflict) th.conflict = { why: String(why).slice(0, 220), t: NOW(), low: th.rel };
             else th.conflict.low = Math.min(th.conflict.low ?? th.rel, th.rel);
         }
-        if (th.conflict && delta > 0 && th.rel >= (th.conflict.low ?? th.rel) + 15 && th.rel > -40) { th.reconciled = { why: th.conflict.why, t: NOW() }; th.conflict = null; notify(s, `🕊️ Вы с ${th.name} помирились.`, 'social'); }
+        if (th.conflict && delta > 0 && th.rel >= (th.conflict.low ?? th.rel) + 15 && th.rel > -40) { th.reconciled = { why: th.conflict.why, t: NOW() }; th.conflict = null; notify(s, `🕊️ Вы с ${th.name} помирились.`, 'social', { view: 'thread', param: th.id }); }
         if (flirt) th.flirt = (th.flirt || 0) + 1; else if (th.flirt) th.flirt = Math.max(0, th.flirt - 0.25);
-        if (before < 50 && th.rel >= 50) { notify(s, `🤝 Вы с ${th.name} теперь друзья`, 'social'); questEvent(s, 'friend'); }
+        if (before < 50 && th.rel >= 50) { notify(s, `🤝 Вы с ${th.name} теперь друзья`, 'social', { view: 'thread', param: th.id }); questEvent(s, 'friend'); }
         if (!th.beef && th.rel <= -60 && th.kind !== 'char') {
             th.beef = true;
             soc(s).hate = clamp(soc(s).hate + 10, 0, 100);
-            notify(s, `⚔️ Бифф с ${th.name}! Конфликт выплеснулся в ленту.`, 'warn');
+            notify(s, `⚔️ Бифф с ${th.name}! Конфликт выплеснулся в ленту.`, 'warn', { view: 'thread', param: th.id });
             enqueue(s, async () => {
                 const x = await aiJSON(`${world(s)}\n\n${th.name}${th.species ? ` (${th.species})` : ''} поссорился(ась) с ${s.profile.name} в личке и выносит конфликт в ленту UniHub: язвительный пост-наезд или прозрачный намёк. Последние сообщения:\n${th.msgs.slice(-6).map((m) => `${m.me ? s.profile.name : th.name}: ${m.text}`).join('\n')}\nФормат: {"text":"до 280 символов","media":"пусто или описание скриншота переписки"}`);
                 if (x?.text) s.feed.unshift({ id: uid(), author: th.name, species: th.species || '', channel: 'general', text: cleanMsg(x.text).slice(0, 500), media: String(x.media || '').slice(0, 200), kind: 'photo', likes: 30 + Math.floor(Math.random() * 300), t: Date.now(), comments: [], story: `Бифф: ${th.name} против ${s.profile.name}` });
@@ -1973,7 +1988,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.12.4 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.13.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -1984,7 +1999,9 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
 
     function notesView(s) {
-        const html = `${head('Уведомления')}${s.notes.length ? s.notes.map((n) => `<div class="sh-note ${n.type} ${n.read ? 'read' : ''}"><span>${esc(n.text)}</span><small>${fmtD(n.t)}</small></div>`).join('') : empty('Уведомлений нет.')}`;
+        const html = `${head('Уведомления')}${s.notes.length ? s.notes.map((n) => n.go
+        ? `<button class="sh-note sh-wide ${n.type} ${n.read ? 'read' : ''}" data-act="openNote" data-id="${n.id}"><span>${esc(n.text)}</span><small>${fmtD(n.t)} <i class="fa-solid fa-chevron-right"></i></small></button>`
+        : `<div class="sh-note ${n.type} ${n.read ? 'read' : ''}"><span>${esc(n.text)}</span><small>${fmtD(n.t)}</small></div>`).join('') : empty('Уведомлений нет.')}`;
         let changed = false;
         for (const n of s.notes) if (!n.read) { n.read = true; changed = true; }
         if (changed) setTimeout(() => { save(s); render(); }, 0);
@@ -2083,7 +2100,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         th.pendingMeet = { at, key, kind: KINDS[mt.kind] ? mt.kind : 'friends', place, note: cleanMsg(mt.note || '').slice(0, 80), problem: '' };
         if (ov && place !== 'skip') th.pendingMeet.conflict = { subject: ov.cl.subject, start: ov.start, end: ov.end };
         else th.pendingMeet.problem = meetProblem(s, at, place);
-        if (!(ui.open && ui.view === 'thread' && ui.param === th.id)) notify(s, `🤝 Похоже, вы договорились с ${th.name} о встрече ${fmtWhen(at)}. Подтвердите в чате.`, 'important');
+        if (!(ui.open && ui.view === 'thread' && ui.param === th.id)) notify(s, `🤝 Похоже, вы договорились с ${th.name} о встрече ${fmtWhen(at)}. Подтвердите в чате.`, 'important', { view: 'thread', param: th.id });
     }
     async function reply(s, th, opts = {}) {
         th.typing = true; render();
@@ -2117,7 +2134,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             r = cleanMsg(r);
             th.msgs.push({ me: false, from, text: r, t: Date.now() });
             th.t = Date.now();
-            if (!(ui.open && ui.view === 'thread' && ui.param === th.id)) { th.unread = (th.unread || 0) + 1; toast('info', `${th.name}: ${r.slice(0, 80)}`); }
+            if (!(ui.open && ui.view === 'thread' && ui.param === th.id)) { th.unread = (th.unread || 0) + 1; toast('info', `${th.name}: ${r.slice(0, 80)}`); notify(s, `💬 ${th.name}: ${r.slice(0, 70)}`, 'social', { view: 'thread', param: th.id }); }
         } else th.msgs.push({ sys: true, text: 'Сообщение не доставлено: ИИ не ответил. Попробуйте ещё раз.', t: Date.now() });
         save(s); render();
     }
@@ -2337,7 +2354,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             if (S() !== s) return;
             const now = Date.now();
             (p.comments ||= []).push(...list.map((c, i) => ({ ...c, t: now + i * 1000 })));
-            if (list.length && !(ui.view === 'post' && ui.param === p.id)) notify(s, `💬 ${list[0].author} ответил(а) на ваш комментарий`, 'social');
+            if (list.length && !(ui.view === 'post' && ui.param === p.id)) notify(s, `💬 ${list[0].author} ответил(а) на ваш комментарий`, 'social', { view: 'post', param: p.id });
             save(s); render();
         },
         proposeMeet: (d, el, s) => {
@@ -2522,6 +2539,19 @@ ${story}
             fillChatInput(`*${s.profile.name} идёт на занятие клуба «${d.c}».*`);
             toggle(false);
         },
+        openNote: (d, el, s) => {
+            const go = s.notes.find((n) => n.id === d.id)?.go;
+            if (!go) return;
+            // цель могла исчезнуть: пост удалён из ленты, диалог сброшен
+            if (go.view === 'post' && !s.feed.some((p) => p.id === go.param)) return toast('info', 'Этот пост уже пропал из ленты.');
+            if (go.view === 'thread' && !s.threads.some((t) => t.id === go.param)) return toast('info', 'Этот диалог больше недоступен.');
+            if (go.view === 'task' && !s.tasks.some((t) => t.id === go.param)) { ui.tab = 'study'; ui.studyTab = 'tasks'; ui.view = null; ui.param = null; return render(); }
+            if (go.tab) { ui.tab = go.tab; ui.view = null; ui.param = null; }
+            if (go.studyTab) ui.studyTab = go.studyTab;
+            if (go.view) { ui.view = go.view; ui.param = go.param ?? null; }
+            ui.replyTo = '';
+            render();
+        },
         syncRel: (d, el, s) => { const th = s.threads.find((t) => t.id === d.id); if (th) { th.relSyncLen = undefined; return syncRel(s, th); } },
         cLike: (d, el, s) => {
             const c = s.feed.find((x) => x.id === d.post)?.comments?.find((x) => x.id === d.id);
@@ -2670,7 +2700,7 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
                 if (late) grade = Math.min(grade, 3);
                 Object.assign(t, { done: true, doneAt: NOW(), answer: ans, grade, comment: `${String(r?.comment || '').slice(0, 400)}${late ? ' Сдано после срока, оценка не выше 3.' : ''}` });
                 s.grades.push({ id: uid(), subject: t.subject, grade, t: NOW(), q: s.quarter.n, task: t.title });
-                notify(s, `✅ «${t.title}»: оценка ${grade}.`);
+                notify(s, `✅ «${t.title}»: оценка ${grade}.`, 'info', { view: 'task', param: t.id });
                 questEvent(s, 'homework');
                 if (grade === 5) questEvent(s, 'grade5', 1, t.subject);
                 if (t.extra) {

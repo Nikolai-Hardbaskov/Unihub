@@ -438,3 +438,7 @@
 }
 
 #unihub-phone .sh-badge.fac { background: color-mix(in srgb, var(--sh-amber) 14%, transparent); color: var(--sh-amber); }
+
+#unihub-phone button.sh-note { font: inherit; }
+#unihub-phone button.sh-note small i { margin-left: 4px; font-size: 10px; }
+#unihub-phone button.sh-note:active { filter: brightness(1.15); }
