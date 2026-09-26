@@ -187,7 +187,7 @@
             quarter: { n: 1, start: now }, lowGpaSince: 0, expelled: false, expelReason: '',
             wallet: { balance: cfg().startBalance, history: [], lastStipend: now },
             feed: [], threads: [], social: { followers: 40 + Math.floor(Math.random() * 60), following: [], seed: 0 },
-            dating: { mode: 'love', profiles: [], matches: [], fSpecies: '', fAbility: '' },
+            dating: { mode: 'love', profiles: [], matches: [], fSpecies: '', fAbility: '', fGender: '' },
             menu: DEFAULT_MENU.map((x) => ({ ...x, id: uid() })), orders: [],
             market: DEFAULT_MARKET.map((x) => ({ ...x, id: uid() })), listings: [], inventory: [],
             events: [], clubs: [], bookings: [], tickets: [], dean: [],
@@ -420,9 +420,17 @@
         else if (p.abilities) L.push(`Способность ${p.name} («${p.abilities}») со стороны не видна: окружающие не реагируют на неё, пока она не проявится или ${p.name} сам(а) не расскажет. Если проявилась — реагируют по ситуации.`);
         return L.join(' ');
     }
+    const GENDERS = { f: 'Женский', m: 'Мужской', nb: 'Небинарный' };
+    /** Жёсткое правило о роде: как писать о пользователе и обращаться к нему. */
+    function genderRule(p) {
+        if (p.gender === 'f') return `${p.name} — девушка. Пиши о ней и обращайся к ней ТОЛЬКО в женском роде (пришла, задумчивая, «ты такая…»), местоимения она/её.`;
+        if (p.gender === 'm') return `${p.name} — парень. Пиши о нём и обращайся к нему ТОЛЬКО в мужском роде (пришёл, задумчивый, «ты такой…»), местоимения он/его.`;
+        if (p.gender === 'nb') return `${p.name} — небинарная персона. Избегай родовых форм: используй нейтральные конструкции («ты сегодня в задумчивости», «ты пришёл(ла)» не пиши — перестрой фразу), местоимения они/их.`;
+        return `Пол ${p.name} не указан — избегай родовых форм по отношению к ${p.name}.`;
+    }
     function world(s) {
         const p = s.profile;
-        return `Мир: университет, где учатся люди, полулюди и сверхъестественные виды.\n${charInfo()}\nСтудент-пользователь: ${p.name}; вид: ${p.species || 'не указан'}; способности: ${abilityInfo(p)}; факультет: ${p.faculty || 'не выбран'}; курс: ${p.year}.\n${reactionGuide(s)}`;
+        return `Мир: университет, где учатся люди, полулюди и сверхъестественные виды.\n${charInfo()}\n${genderRule(p)}\nСтудент-пользователь: ${p.name}; пол: ${GENDERS[p.gender] || 'не указан'}; вид: ${p.species || 'не указан'}; способности: ${abilityInfo(p)}; факультет: ${p.faculty || 'не выбран'}; курс: ${p.year}.\n${reactionGuide(s)}`;
     }
     async function loreText(filterRe) {
         const c = ctx();
@@ -1124,6 +1132,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const L = [`[UniHub — статус студента ${p.name}]`];
         if (s.expelled) L.push(`${p.name} ОТЧИСЛЕН(А) из университета. Причина: ${s.expelReason}.`);
         if (gameMode(s)) L.push(`Время истории (часы UniHub): ${fmtFull(s.clock.t)}.`);
+        L.push(genderRule(p));
         L.push(`Вид: ${p.species || '—'}; факультет: ${p.faculty}; ${p.year} курс. Рейтинг ${rating(s)}%, нарушений ${activeStrikes(s).length}/${cfg().maxStrikes} в четверти, средний балл ${g === null ? 'нет оценок' : g.toFixed(2)}, баланс ${money(s.wallet.balance)}.`);
         if (!s.expelled) {
             const { cur, next } = curNext(s);
@@ -1257,6 +1266,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const abOther = !!p.abilities && !abKnown;
         const hidden = (b) => (b ? '' : ' style="display:none"');
         return `
+          <label>Пол<select id="${pre}-gender"><option value="">— выберите —</option>${Object.entries(GENDERS).map(([k, v]) => `<option value="${k}" ${p.gender === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
           <label>Вид<select id="${pre}-species" data-change="idSel" data-other="${pre}-species-o">
             <option value="">— выберите —</option>
             ${lore.length ? `<optgroup label="Из вашего мира">${lore.map((x) => `<option ${x === p.species ? 'selected' : ''}>${esc(x)}</option>`).join('')}</optgroup>` : ''}
@@ -1278,6 +1288,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
           <label>Курс<select id="${pre}-year">${Array.from({ length: MAX_YEAR }, (_, i) => `<option value="${i + 1}" ${+p.year === i + 1 ? 'selected' : ''}>${i + 1} курс</option>`).join('')}</select></label>`;
     }
     function readIdentity(pre, p) {
+        const g = val(`${pre}-gender`);
+        if (GENDERS[g]) p.gender = g;
         const sp = val(`${pre}-species`);
         p.species = sp === '__other' ? val(`${pre}-species-t`) : sp;
         const ab = val(`${pre}-abil`);
@@ -1336,6 +1348,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         if (ui.channel.startsWith('story:')) chips[ui.channel] = `📖 ${ui.channel.slice(6)}`;
         return `
         <button class="sh-me" data-act="go" data-view="me">${ava(s.profile.name)}<div><b>${esc(s.profile.name)}</b><small>Ур. ${levelOf(soc(s))} · ${kfmt(s.social.followers)} подписчиков · авторитет ${Math.round(s.social.authority)}</small></div><i class="fa-solid fa-chevron-right"></i></button>
+        ${!s.profile.gender ? '<button class="sh-note warn sh-wide" data-act="go" data-view="profile"><i class="fa-solid fa-venus-mars"></i><span>Укажите свой пол в профиле, чтобы студенты обращались к вам правильно.</span></button>' : ''}
         ${cancelled(s) ? `<div class="sh-note bad"><i class="fa-solid fa-ban"></i><span>Вас «отменяют» ещё ${left(s.social.cancelledUntil, Date.now())}: охваты урезаны, подписчики уходят.</span></div>` : ''}
         ${authors.length ? `<div class="sh-stories">${authors.map((p) => `<button class="sh-story" data-act="person" data-name="${esc(p.author)}">${ava(p.author, true)}<small>${esc(p.author.split(' ')[0])}</small></button>`).join('')}</div>` : ''}
         <div class="sh-chips">${Object.entries(chips).map(([k, v]) => `<button class="sh-chip ${ui.channel === k ? 'on' : ''}" data-act="channel" data-ch="${k}">${esc(k === 'species' && s.profile.species ? s.profile.species : v)}</button>`).join('')}</div>
@@ -1450,6 +1463,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         return `<h3 class="sh-h">Знакомства <small>только для студентов, профили верифицированы</small></h3>
         <div class="sh-seg"><button class="${d.mode === 'love' ? 'on' : ''}" data-act="dMode" data-mode="love">Свидания</button><button class="${d.mode === 'friends' ? 'on' : ''}" data-act="dMode" data-mode="friends">Друзья</button></div>
         <div class="sh-card sh-form">
+          <label>Кого показывать<select id="sh-d-gender"><option value="" ${!d.fGender ? 'selected' : ''}>Всех</option><option value="m" ${d.fGender === 'm' ? 'selected' : ''}>Парней</option><option value="f" ${d.fGender === 'f' ? 'selected' : ''}>Девушек</option><option value="nb" ${d.fGender === 'nb' ? 'selected' : ''}>Небинарных</option></select></label>
           <label>Вид<select id="sh-d-species">${speciesOptions(s, d.fSpecies, 'Любой вид')}</select></label>
           <label>Способности<select id="sh-d-abil">${abilityOptions(s, d.fAbility, 'Любые способности')}</select></label>
           <button class="sh-btn" data-act="genDating"><i class="fa-solid fa-wand-magic-sparkles"></i> Подобрать анкеты</button>
@@ -1749,7 +1763,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.10.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.10.1 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2020,6 +2034,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             readAuth(s);
             const fac = val('sh-a-fac') || s.profile.faculty;
             if (!s.profile.name) return toast('warning', 'Укажите имя студента.');
+            if (!s.profile.gender) return toast('warning', 'Выберите пол.');
             if (!s.profile.species) return toast('warning', 'Выберите вид.');
             if (!s.profile.abilities) return toast('warning', 'Выберите способность или «Отсутствуют».');
             if (!fac) return toast('warning', 'Выберите факультет или впишите свой.');
@@ -2327,10 +2342,10 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
         dMode: (d, el, s) => { s.dating.mode = d.mode; s.dating.profiles = []; save(s); render(); },
         genDating: (d, el, s) => {
             const dt = s.dating;
-            dt.fSpecies = val('sh-d-species'); dt.fAbility = val('sh-d-abil');
+            dt.fSpecies = val('sh-d-species'); dt.fAbility = val('sh-d-abil'); dt.fGender = val('sh-d-gender');
             dt.profiles = [];
             return withBusy('Подбираю анкеты…', async () => {
-                const r = await aiJSON(`${world(s)}\n\n${loreStudentsLine(s)}\nЕсли среди студентов из лора есть подходящие под фильтры — включи 1–2 из них с их настоящими данными, остальных придумай.\nСгенерируй 5 анкет студентов этого университета для ${dt.mode === 'friends' ? 'поиска друзей' : 'романтических знакомств'} в UniHub. Вид пользователя: ${s.profile.species || 'не указан'}. Фильтры: вид — ${dt.fSpecies || 'любой'}; способности — ${dt.fAbility === NO_ABIL ? 'без сверхъестественных способностей' : dt.fAbility || 'любые'}. Оцени межвидовую совместимость с пользователем (compat 0–100) и коротко объясни.\nФормат: [{"name":"Имя","age":20,"species":"","faculty":"","abilities":"","bio":"до 200 символов","compat":75,"compatNote":"одно предложение","verified":true}]`);
+                const r = await aiJSON(`${world(s)}\n\n${loreStudentsLine(s)}\nЕсли среди студентов из лора есть подходящие под фильтры — включи 1–2 из них с их настоящими данными, остальных придумай.\nСгенерируй 5 анкет студентов этого университета для ${dt.mode === 'friends' ? 'поиска друзей' : 'романтических знакомств'} в UniHub. Вид пользователя: ${s.profile.species || 'не указан'}. Фильтры: пол — ${{ m: 'только парни', f: 'только девушки', nb: 'только небинарные' }[dt.fGender] || 'любой'}; вид — ${dt.fSpecies || 'любой'}; способности — ${dt.fAbility === NO_ABIL ? 'без сверхъестественных способностей' : dt.fAbility || 'любые'}. Оцени межвидовую совместимость с пользователем (compat 0–100) и коротко объясни.\nФормат: [{"name":"Имя","age":20,"species":"","faculty":"","abilities":"","bio":"до 200 символов","compat":75,"compatNote":"одно предложение","verified":true,"gender":"m, f или nb"}]`);
                 if (!Array.isArray(r) || !r.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
                 dt.profiles = r.filter((p) => p && p.name).map((p) => ({ id: uid(), name: String(p.name).slice(0, 40), age: parseInt(p.age, 10) || 19, species: String(p.species || '').slice(0, 40), faculty: String(p.faculty || '').slice(0, 60), abilities: String(p.abilities || '').slice(0, 120), bio: String(p.bio || '').slice(0, 300), compat: clamp(parseInt(p.compat, 10) || 50, 0, 100), compatNote: String(p.compatNote || '').slice(0, 160), verified: p.verified !== false }));
                 save(s);

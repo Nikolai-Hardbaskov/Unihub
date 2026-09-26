@@ -350,3 +350,5 @@
 #unihub-phone .sh-typing { color: var(--sh-amber) !important; font-style: italic; }
 
 #unihub-phone .sh-official { border-color: rgba(239, 95, 118, .5); }
+
+#unihub-phone .sh-note.sh-wide { width: 100%; text-align: left; color: var(--sh-text); cursor: pointer; border-top: 0; border-right: 0; border-bottom: 0; }
