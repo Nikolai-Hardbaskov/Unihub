@@ -33,7 +33,7 @@
     width: 390px; height: min(780px, calc(100vh - 36px));
     display: none; flex-direction: column; overflow: hidden;
     background: var(--sh-ink); color: var(--sh-text);
-    border: 7px solid #07060b; border-radius: 36px;
+    border: 7px solid var(--sh-frame); border-radius: 36px;
     box-shadow: 0 24px 60px rgba(0, 0, 0, .6);
     font: 400 14px/1.45 var(--sh-sans); text-align: left;
 }
@@ -56,7 +56,7 @@
 #unihub-phone .sh-clock { font-weight: 600; font-variant-numeric: tabular-nums; }
 #unihub-phone .sh-brand { flex: 1; text-align: center; font: 700 19px/1 var(--sh-serif); color: var(--sh-amber); letter-spacing: .02em; }
 #unihub-phone .sh-sb-right { display: flex; align-items: center; gap: 4px; }
-#unihub-phone .sh-pill { padding: 2px 7px; border-radius: 8px; background: var(--sh-card); font-size: 11px; font-variant-numeric: tabular-nums; }
+#unihub-phone .sh-pill { color: var(--sh-text); padding: 2px 7px; border-radius: 8px; background: var(--sh-card); font-size: 11px; font-variant-numeric: tabular-nums; }
 
 #unihub-phone button { font: inherit; color: inherit; cursor: pointer; }
 #unihub-phone .sh-icon { position: relative; background: none; border: 0; padding: 6px; font-size: 15px; color: var(--sh-mute); }
@@ -99,7 +99,7 @@
 #unihub-phone .sh-btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 7px;
     padding: 10px 14px; border-radius: 11px; border: 1px solid var(--sh-amber);
-    background: var(--sh-amber); color: #1b1307; font-weight: 600;
+    background: var(--sh-amber); color: var(--sh-on); font-weight: 600;
 }
 #unihub-phone .sh-btn:hover { filter: brightness(1.08); }
 #unihub-phone .sh-btn:disabled { opacity: .45; cursor: not-allowed; }
@@ -112,19 +112,20 @@
 /* чипы и сегменты */
 #unihub-phone .sh-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; scrollbar-width: none; }
 #unihub-phone .sh-chip { flex-shrink: 0; padding: 5px 12px; border-radius: 20px; border: 1px solid var(--sh-line); background: none; font-size: 13px; color: var(--sh-mute); }
-#unihub-phone .sh-chip.on { border-color: var(--sh-violet); color: var(--sh-text); background: rgba(143, 124, 240, .18); }
+#unihub-phone .sh-chip.on { border-color: var(--sh-violet); color: var(--sh-text); background: color-mix(in srgb, var(--sh-amber) 16%, transparent); border-color: var(--sh-amber); }
 #unihub-phone .sh-seg { display: flex; background: var(--sh-card); border-radius: 12px; padding: 3px; margin-bottom: 10px; }
 #unihub-phone .sh-seg button { flex: 1; border: 0; background: none; padding: 7px; border-radius: 9px; color: var(--sh-mute); }
 #unihub-phone .sh-seg button.on { background: var(--sh-line); color: var(--sh-text); }
 
 /* аватары, бейджи */
-#unihub-phone .sh-ava { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; }
+#unihub-phone .sh-ava { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #f3eefb; font-weight: 600; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+#unihub-phone .sh-ava i { font-size: .95em; opacity: .92; }
 #unihub-phone .sh-ava.big { width: 52px; height: 52px; font: 700 22px var(--sh-serif); }
-#unihub-phone .sh-badge { display: inline-block; margin: 3px 4px 0 0; padding: 1px 8px; border-radius: 6px; font-size: 11px; background: rgba(143, 124, 240, .2); color: #cfc6ff; }
-#unihub-phone .sh-badge.ok { background: rgba(92, 201, 154, .18); color: var(--sh-ok); }
-#unihub-phone .sh-badge.bad { background: rgba(239, 95, 118, .18); color: var(--sh-bad); }
-#unihub-phone .sh-badge.mid { background: rgba(163, 156, 186, .15); color: var(--sh-mute); }
-#unihub-phone .sh-badge.live { background: rgba(240, 180, 76, .2); color: var(--sh-amber); }
+#unihub-phone .sh-badge { display: inline-block; margin: 3px 4px 0 0; padding: 1px 8px; border-radius: 6px; font-size: 11px; background: color-mix(in srgb, var(--sh-violet) 18%, transparent); color: var(--sh-violet); }
+#unihub-phone .sh-badge.ok { background: color-mix(in srgb, var(--sh-ok) 18%, transparent); color: var(--sh-ok); }
+#unihub-phone .sh-badge.bad { background: color-mix(in srgb, var(--sh-bad) 18%, transparent); color: var(--sh-bad); }
+#unihub-phone .sh-badge.mid { background: color-mix(in srgb, var(--sh-mute) 15%, transparent); color: var(--sh-mute); }
+#unihub-phone .sh-badge.live { background: color-mix(in srgb, var(--sh-amber) 20%, transparent); color: var(--sh-amber); }
 #unihub-phone .sh-verified { color: var(--sh-violet); font-size: 12px; }
 
 /* списки */
@@ -148,7 +149,7 @@
 #unihub-phone .sh-story small { max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #unihub-phone .sh-post-h { display: flex; gap: 10px; align-items: flex-start; }
 #unihub-phone .sh-post-t { margin: 10px 0 6px; white-space: pre-wrap; }
-#unihub-phone .sh-media { display: flex; gap: 10px; align-items: center; padding: 22px 14px; margin: 6px 0; border-radius: 10px; background: linear-gradient(160deg, #2a2242, #191426); color: var(--sh-mute); font-style: italic; font-size: 13px; }
+#unihub-phone .sh-media { display: flex; gap: 10px; align-items: center; padding: 22px 14px; margin: 6px 0; border-radius: 10px; background: var(--sh-card2); color: var(--sh-mute); font-style: italic; font-size: 13px; }
 #unihub-phone .sh-media i { font-size: 20px; color: var(--sh-violet); font-style: normal; }
 #unihub-phone .sh-post-a { display: flex; gap: 14px; }
 #unihub-phone .sh-post-a button { background: none; border: 0; padding: 4px 0; color: var(--sh-mute); }
@@ -158,7 +159,7 @@
 /* мессенджер */
 #unihub-phone .sh-msgs { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; }
 #unihub-phone .sh-msg { align-self: flex-start; max-width: 82%; padding: 8px 11px; border-radius: 14px 14px 14px 4px; background: var(--sh-card); white-space: pre-wrap; word-wrap: break-word; }
-#unihub-phone .sh-msg.me { align-self: flex-end; border-radius: 14px 14px 4px 14px; background: #3a2f63; }
+#unihub-phone .sh-msg.me { align-self: flex-end; border-radius: 14px 14px 4px 14px; background: var(--sh-me); }
 #unihub-phone .sh-msg b { display: block; font-size: 12px; color: var(--sh-amber); }
 #unihub-phone .sh-msg time { display: block; text-align: right; font-size: 10px; color: var(--sh-mute); margin-top: 2px; }
 #unihub-phone .sh-msg.typing { font-style: italic; color: var(--sh-mute); }
@@ -175,7 +176,7 @@
 #unihub-phone .sh-idcard {
     display: flex; align-items: center; gap: 12px; padding: 14px; margin-bottom: 12px;
     border-radius: 16px; border: 1px solid var(--sh-line);
-    background: linear-gradient(120deg, #251d3c 0%, #1a1529 70%);
+    background: linear-gradient(120deg, var(--sh-card2) 0%, var(--sh-card) 75%);
 }
 #unihub-phone .sh-idcard > div:nth-child(2) { flex: 1; min-width: 0; }
 #unihub-phone .sh-idcard > div > b { font: 700 19px/1.1 var(--sh-serif); }
@@ -246,7 +247,7 @@
 #unihub-phone .sh-crest p { color: var(--sh-mute); font-size: 13px; }
 #unihub-phone .sh-fac-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 #unihub-phone .sh-fac { text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--sh-line); background: var(--sh-card); }
-#unihub-phone .sh-fac.on { border-color: var(--sh-amber); background: rgba(240, 180, 76, .1); }
+#unihub-phone .sh-fac.on { border-color: var(--sh-amber); background: color-mix(in srgb, var(--sh-amber) 12%, transparent); }
 #unihub-phone .sh-fac b { display: block; }
 #unihub-phone .sh-fac em { font-size: 11px; color: var(--sh-violet); }
 
@@ -263,7 +264,7 @@
 #unihub-phone .sh-busy {
     position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%);
     display: flex; gap: 10px; align-items: center; padding: 10px 16px; border-radius: 20px;
-    background: #2b2345; border: 1px solid var(--sh-line); box-shadow: 0 8px 20px rgba(0, 0, 0, .4); white-space: nowrap;
+    background: var(--sh-card2); border: 1px solid var(--sh-line); box-shadow: 0 8px 20px rgba(0, 0, 0, .4); white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -289,7 +290,7 @@
 #unihub-phone .sh-cmt .sh-ava { width: 30px; height: 30px; font-size: 13px; }
 #unihub-phone .sh-cmt > div { flex: 1; min-width: 0; }
 #unihub-phone .sh-cmt-b { background: var(--sh-card); border: 1px solid var(--sh-line); border-radius: 4px 14px 14px 14px; padding: 7px 10px; }
-#unihub-phone .sh-cmt.mine .sh-cmt-b { background: #2c2450; }
+#unihub-phone .sh-cmt.mine .sh-cmt-b { background: var(--sh-me); }
 #unihub-phone .sh-cmt-b p { margin: 3px 0 0; white-space: pre-wrap; word-wrap: break-word; }
 #unihub-phone .sh-cmt-b .sh-badge { font-size: 10px; }
 #unihub-phone .sh-at { color: var(--sh-violet); }
@@ -308,7 +309,7 @@
 #unihub-phone .sh-stats b { font-size: 16px; }
 
 #unihub-phone .sh-storytag { display: inline-flex; gap: 6px; align-items: center; margin: 8px 6px 0 0; padding: 2px 9px; border-radius: 8px; border: 1px solid var(--sh-line); background: none; color: var(--sh-violet); font-size: 11px; }
-#unihub-phone .sh-storytag.hot { color: var(--sh-amber); border-color: rgba(240, 180, 76, .4); }
+#unihub-phone .sh-storytag.hot { color: var(--sh-amber); border-color: color-mix(in srgb, var(--sh-amber) 40%, transparent); }
 #unihub-phone .sh-lvl { display: flex; justify-content: space-between; align-items: baseline; }
 #unihub-phone .sh-lvl b { font: 700 18px var(--sh-serif); color: var(--sh-amber); }
 #unihub-phone .sh-stats.two { grid-template-columns: 1fr 1fr; margin: 8px 0; }
@@ -352,3 +353,49 @@
 #unihub-phone .sh-official { border-color: rgba(239, 95, 118, .5); }
 
 #unihub-phone .sh-note.sh-wide { width: 100%; text-align: left; color: var(--sh-text); cursor: pointer; border-top: 0; border-right: 0; border-bottom: 0; }
+
+/* Тема SillyTavern не должна перекрашивать UniHub */
+#unihub-phone { font-family: var(--sh-sans) !important; color: var(--sh-text) !important; }
+#unihub-phone *:not(i):not([class*="fa-"]) { font-family: inherit; opacity: 1; filter: none; text-shadow: none; letter-spacing: normal; }
+#unihub-phone .sh-brand, #unihub-phone .sh-h, #unihub-phone .sh-head h3, #unihub-phone .sh-crest h2, #unihub-phone .sh-lvl b,
+#unihub-phone .sh-gpa b, #unihub-phone .sh-balance b, #unihub-phone .sh-bigclock b, #unihub-phone .sh-person b, #unihub-phone .sh-idcard > div > b { font-family: var(--sh-serif) !important; }
+#unihub-phone h2, #unihub-phone h3, #unihub-phone h4, #unihub-phone b, #unihub-phone p, #unihub-phone span, #unihub-phone label { color: inherit; }
+#unihub-phone .sh-screen, #unihub-phone .sh-card, #unihub-phone .sh-li, #unihub-phone .sh-note { color: var(--sh-text) !important; }
+#unihub-phone h3, #unihub-phone h2 { color: var(--sh-text) !important; }
+#unihub-phone h4, #unihub-phone small, #unihub-phone .sh-muted, #unihub-phone .sh-form label, #unihub-phone .sh-auth label { color: var(--sh-mute) !important; }
+#unihub-phone .sh-toggle, #unihub-phone .sh-toggle span { color: var(--sh-text) !important; }
+#unihub-phone input:not([type='checkbox']), #unihub-phone textarea, #unihub-phone select {
+    background: var(--sh-ink) !important; color: var(--sh-text) !important; border: 1px solid var(--sh-line) !important;
+    box-shadow: none !important; backdrop-filter: none !important; -webkit-text-fill-color: var(--sh-text) !important; }
+#unihub-phone input::placeholder, #unihub-phone textarea::placeholder { color: var(--sh-mute) !important; -webkit-text-fill-color: var(--sh-mute) !important; opacity: .8 !important; }
+#unihub-phone select option, #unihub-phone select optgroup { background: var(--sh-card); color: var(--sh-text); }
+#unihub-phone .sh-btn { color: var(--sh-on) !important; }
+#unihub-phone .sh-btn.ghost { color: var(--sh-amber) !important; background: transparent !important; }
+#unihub-phone .sh-btn.danger { color: #fff !important; }
+#unihub-phone .sh-toggle input { appearance: auto !important; -webkit-appearance: checkbox !important; width: 18px !important; height: 18px !important; margin: 0 !important; flex-shrink: 0; }
+#unihub-phone .sh-toggle { flex-direction: row !important; flex-wrap: nowrap; }
+
+/* ───── темы ───── */
+#unihub-phone { --sh-on: #1b1307; --sh-me: #3a2f63; --sh-card2: #251d3c; --sh-frame: #07060b; }
+#unihub-phone[data-theme="pearl"]   { --sh-ink:#1a1824; --sh-card:#24212f; --sh-card2:#2b2740; --sh-line:#36324a; --sh-text:#ece8f5; --sh-mute:#a29db5; --sh-amber:#b9a7ec; --sh-violet:#e3b7c8; --sh-on:#1a1824; --sh-me:#3a3355; --sh-ok:#8fd1b3; --sh-bad:#e8879b; }
+#unihub-phone[data-theme="forest"]  { --sh-ink:#151b19; --sh-card:#1f2724; --sh-card2:#25302c; --sh-line:#2f3b37; --sh-text:#e8efe9; --sh-mute:#9aaba3; --sh-amber:#9fcbb0; --sh-violet:#d8c79a; --sh-on:#151b19; --sh-me:#2c3a34; --sh-ok:#9fcbb0; --sh-bad:#e0918f; }
+#unihub-phone[data-theme="rose"]    { --sh-ink:#1d1619; --sh-card:#2a2024; --sh-card2:#33262b; --sh-line:#3e2f35; --sh-text:#f3e9ec; --sh-mute:#b39ea6; --sh-amber:#e0a9b8; --sh-violet:#c9b6e4; --sh-on:#1d1619; --sh-me:#432f38; --sh-ok:#9fd0b5; --sh-bad:#ee8a9c; }
+#unihub-phone[data-theme="ocean"]   { --sh-ink:#121925; --sh-card:#1b2433; --sh-card2:#212c3e; --sh-line:#2b3850; --sh-text:#e6edf6; --sh-mute:#93a2b8; --sh-amber:#8fc3d6; --sh-violet:#b3a8e0; --sh-on:#121925; --sh-me:#243552; --sh-ok:#8fd1b3; --sh-bad:#ec8c98; }
+#unihub-phone[data-theme="library"] { --sh-ink:#f6f2ec; --sh-card:#ffffff; --sh-card2:#fbf8f3; --sh-line:#e4ddd2; --sh-text:#2e2a33; --sh-mute:#7d7684; --sh-amber:#7a6aa8; --sh-violet:#5f8f88; --sh-on:#ffffff; --sh-me:#ebe5f6; --sh-ok:#3f8f6b; --sh-bad:#c4506a; --sh-frame:#d9d1c4; }
+#unihub-phone[data-theme="classic"] { }
+
+/* посты сюжетных линий и живые карточки */
+#unihub-phone .sh-post.story { border-left: 3px solid var(--sh-violet); border-radius: 0 14px 14px 0; }
+#unihub-phone .sh-class.live, #unihub-phone .sh-pending { box-shadow: 0 0 0 1px var(--sh-amber) inset; }
+@keyframes sh-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+#unihub-phone .sh-status .sh-dot { animation: sh-pulse 2.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { #unihub-phone .sh-status .sh-dot { animation: none; } }
+
+/* выбор темы */
+#unihub-phone .sh-themes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#unihub-phone .sh-theme { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 12px; border: 1px solid var(--sh-line); background: none; text-align: left; font-size: 12px; color: var(--sh-text); }
+#unihub-phone .sh-theme.on { border-color: var(--sh-amber); box-shadow: 0 0 0 1px var(--sh-amber) inset; }
+#unihub-phone .sh-theme .sw { display: flex; height: 26px; border-radius: 7px; overflow: hidden; border: 1px solid rgba(0,0,0,.2); }
+#unihub-phone .sh-theme .sw span { flex: 1; }
+
+#unihub-phone .sh-relsync { background: none; border: 0; padding: 0 4px; color: var(--sh-mute); font-size: 11px; cursor: pointer; }

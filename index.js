@@ -32,6 +32,7 @@
         showFab: true,
         inject: true,
         injectDepth: 2,
+        theme: 'pearl',         // тема оформления
         shareDMs: true,         // передавать переписку UniHub в основной чат
         timeMode: 'game',       // для новых чатов: game — часы истории, real — реальное время
         syncHorae: true,        // брать время из расширения Horae, если найдено
@@ -90,12 +91,29 @@
         if (h < 48) return `${h} ч ${m % 60} мин`;
         return `${Math.floor(h / 24)} дн ${h % 24} ч`;
     }
-    function hue(str) {
-        let h = 0;
-        for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-        return `hsl(${h % 360} 45% 42%)`;
-    }
-    const ava = (name, big) => `<span class="sh-ava${big ? ' big' : ''}" style="background:${hue(name)}">${esc(String(name || '?').trim().charAt(0).toUpperCase())}</span>`;
+    // приглушённые мягкие тона в гамме приложения
+    const AVA_TONES = [['#5e5484', '#7a6fa3'], ['#4d6573', '#6a8593'], ['#6f6350', '#8f8169'], ['#566a5f', '#72887b'], ['#7d5566', '#9a7283'], ['#4f5a75', '#6c7897'], ['#665574', '#846f93'], ['#4b6664', '#678381']];
+    function hash(str) { let h = 0; for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; }
+    // иконка по виду: от частного к общему
+    const SPECIES_ICONS = [
+        [/пантер|кош|тигр|лев|ягуар|рыс/i, 'fa-cat'], [/волк|собак|пёс|пес|шакал/i, 'fa-dog'], [/лис|кицунэ|енот|тануки/i, 'fa-paw'],
+        [/сов|ворон|гарпи|птиц|тэнгу|грифон/i, 'fa-crow'], [/дракон|василиск|ламия|наг|змея|змей/i, 'fa-dragon'],
+        [/призрак|банши|тень|дух|юки/i, 'fa-ghost'], [/лич|зомби|ревенант|мумия|жнец|скелет/i, 'fa-skull'],
+        [/вампир|дампир/i, 'fa-droplet'], [/оборот|перевёрт|перевертыш/i, 'fa-moon'],
+        [/сирен|русал|тритон|келпи|кракен|селки/i, 'fa-water'], [/кентавр/i, 'fa-horse'],
+        [/ангел|нефилим/i, 'fa-dove'], [/демон|бес|ифрит|суккуб|инкуб|óни|они\b|феникс|огн/i, 'fa-fire'],
+        [/эльф|дриад|нимф|сатир/i, 'fa-leaf'], [/фейри|пикси/i, 'fa-wand-magic-sparkles'],
+        [/ведьм|колдун|маг\b|джинн/i, 'fa-hat-wizard'], [/голем|автоматон|гомункул/i, 'fa-robot'],
+        [/элементал|слайм|мимик|химер/i, 'fa-atom'], [/горгон/i, 'fa-eye'],
+        [/гоблин|гном|тролль|огр/i, 'fa-hammer'], [/медвед|олен|кролик|бык|минотавр|полулюд/i, 'fa-paw'],
+    ];
+    const speciesIcon = (sp) => (sp ? (SPECIES_ICONS.find(([re]) => re.test(sp)) || [])[1] : '') || '';
+    const ava = (name, big, species) => {
+        const [a, b] = AVA_TONES[hash(name) % AVA_TONES.length];
+        const ic = speciesIcon(species);
+        const inner = ic ? `<i class="fa-solid ${ic}"></i>` : esc(String(name || '?').trim().charAt(0).toUpperCase());
+        return `<span class="sh-ava${big ? ' big' : ''}" style="background:linear-gradient(135deg, ${a}, ${b})">${inner}</span>`;
+    };
     const badge = (t, cls = '') => t ? `<span class="sh-badge ${cls}">${esc(t)}</span>` : '';
     const empty = (t) => `<div class="sh-empty">${t}</div>`;
     const head = (title, sub = '') => `<div class="sh-head"><button class="sh-icon" data-act="back" aria-label="Назад"><i class="fa-solid fa-chevron-left"></i></button><div><h3>${esc(title)}</h3>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
@@ -866,6 +884,11 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     function relLabel(t) {
         const r = t.rel || 0;
         if (t.kind === 'group' || t.kind === 'official') return '';
+        const talked = t.msgs?.some((m) => m.me);
+        if (t.conflict && r > -60) return 'в ссоре';
+        if (t.known === false && !talked) return 'не знакомы';
+        if (t.status && Math.abs(r - (t.relAtSync ?? r)) < 15) return t.status;
+        if (t.known === undefined && !talked && t.kind === 'dm' && !t.msgs?.length) return 'не знакомы';
         if (r <= -60) return 'вражда';
         if (r <= -20) return 'неприязнь';
         if ((t.flirt || 0) >= 3 && r >= 40) return r >= 75 ? 'влюблённость' : 'флирт';
@@ -874,9 +897,15 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         if (r < 80) return 'друзья';
         return 'близкие';
     }
-    function updateRel(s, th, delta, flirt, maxStep = 8) {
+    function updateRel(s, th, delta, flirt, maxStep = 8, why = '') {
         const before = th.rel ?? 0;
         th.rel = clamp(before + clamp(Math.round(delta), -maxStep, maxStep), -100, 100);
+        // запоминаем причину конфликта и момент примирения
+        if (why && (delta <= -4 || th.rel <= -20)) {
+            if (!th.conflict) th.conflict = { why: String(why).slice(0, 220), t: NOW(), low: th.rel };
+            else th.conflict.low = Math.min(th.conflict.low ?? th.rel, th.rel);
+        }
+        if (th.conflict && delta > 0 && th.rel >= (th.conflict.low ?? th.rel) + 15 && th.rel > -40) { th.reconciled = { why: th.conflict.why, t: NOW() }; th.conflict = null; notify(s, `🕊️ Вы с ${th.name} помирились.`, 'social'); }
         if (flirt) th.flirt = (th.flirt || 0) + 1; else if (th.flirt) th.flirt = Math.max(0, th.flirt - 0.25);
         if (before < 50 && th.rel >= 50) { notify(s, `🤝 Вы с ${th.name} теперь друзья`, 'social'); questEvent(s, 'friend'); }
         if (!th.beef && th.rel <= -60 && th.kind !== 'char') {
@@ -889,6 +918,48 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             });
         }
         if (th.beef && th.rel > -20) th.beef = false;
+    }
+    /** Кто не знаком нам по лору и не мелькал в истории — синхронизировать нечего. */
+    function relevantForSync(s, th) {
+        if (th.kind === 'char') return true;
+        if (th.kind !== 'dm') return false;
+        if (lorePerson(s, th.name)) return true;
+        const first = th.name.toLowerCase().split(' ')[0];
+        return first.length > 2 && recentStory(30).toLowerCase().includes(first);
+    }
+    function needsRelSync(s, th) {
+        if (th.relSyncing || !relevantForSync(s, th)) return false;
+        const len = (ctx().chat || []).length;
+        return th.relSyncLen === undefined || len - th.relSyncLen >= 6;
+    }
+    /** Определяет текущие отношения по карточке, основной истории и переписке (история важнее карточки). */
+    async function syncRel(s, th) {
+        if (th.relSyncing) return;
+        th.relSyncing = true; render();
+        try {
+            const c = ctx(), ch = c.characters?.[c.characterId];
+            const lp = lorePerson(s, th.name);
+            const about = th.kind === 'char'
+                ? `${charCard()}${field(ch, 'first_mes') ? `\nПервое сообщение истории: ${macros(field(ch, 'first_mes')).slice(0, 1200)}` : ''}`
+                : `${th.name}${th.species ? ` (${th.species})` : ''}. ${th.bio || ''}${lp ? ` Из лора: ${lp.bio}${lp.relation ? `; для ${c.name2}: ${lp.relation}` : ''}.` : ''}`;
+            const dms = th.msgs.filter((m) => !m.sys).slice(-10).map((m) => `${m.me ? s.profile.name : th.name}: ${m.text}`).join('\n');
+            const r = await aiJSON(`${about}\n\nПоследние события основной истории:\n${recentStory(20) || '(истории пока нет)'}\n\nПереписка в UniHub:\n${dms || '(не переписывались)'}\n\nОпредели, какие СЕЙЧАС отношения у ${th.name} с ${s.profile.name}. Опирайся на факты: история и переписка важнее карточки — если по карточке они не знакомы, а в истории уже подружились или начали встречаться, верь истории. Если они ещё ни разу не общались и не знакомы — known: false.\nФормат: {"known":true,"rel":число от −100 (вражда) до 100 (самые близкие),"status":"короткий статус по-русски: не знакомы, знакомые, приятели, друзья, близкие друзья, флирт, пара, соперники, неприязнь, вражда…","pair":true если они сейчас в романтических отношениях,"note":"одной фразой, на чём основан вывод"}`);
+            if (S() !== s || !r || typeof r !== 'object') return;
+            th.known = r.known !== false;
+            th.rel = clamp(Math.round(+r.rel || 0), -100, 100);
+            th.relAtSync = th.rel;
+            if (th.rel > -10 && th.conflict) { th.reconciled = { why: th.conflict.why, t: NOW() }; th.conflict = null; }
+            if (th.rel <= -20 && !th.conflict) th.conflict = { why: cleanMsg(r.note || 'конфликт в истории').slice(0, 220), t: NOW(), low: th.rel };
+            th.status = th.known ? cleanMsg(r.status || '').slice(0, 30).toLowerCase() : 'не знакомы';
+            th.relNote = cleanMsg(r.note || '').slice(0, 200);
+            th.pair = r.pair === true || r.pair === 'true';
+            th.relSyncLen = (ctx().chat || []).length;
+            if (th.kind === 'char' && th.pair !== !!s.profile.relWithChar) {
+                s.profile.relWithChar = th.pair;
+                notify(s, th.pair ? `💞 По истории вы с ${th.name} — пара. Отмечено в профиле.` : `По истории вы с ${th.name} сейчас не пара. Отметка в профиле снята.`, 'social');
+            }
+            save(s);
+        } finally { th.relSyncing = false; render(); }
     }
     function jealousNote(s, th) {
         if (th.kind !== 'char') return '';
@@ -944,7 +1015,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 const how = pick([`увидел(а) уведомление UniHub на телефоне ${s.profile.name}`, 'кто-то выложил в ленту UniHub фото с этого свидания', 'общий знакомый рассказал', 'случайно оказался(ась) рядом и всё увидел(а) сам(а)']);
                 m.caught = how;
                 s.jealousy.push({ with: m.with, how, t: NOW() });
-                updateRel(s, ct, -30, false, 40);
+                updateRel(s, ct, -30, false, 40, `узнал(а) о свидании ${s.profile.name} с ${m.with}`);
                 notify(s, `💔 ${ct.name} узнал(а) о вашем свидании с ${m.with}…`, 'bad');
                 enqueue(s, async () => {
                     const txt = await aiText(`${world(s)}\n${charCard()}\n\n${ct.name} и ${s.profile.name} — пара. ${ct.name} только что узнал(а), что ${s.profile.name} пошёл(пошла) на свидание с ${m.with}: ${how}. Напиши сообщение ${ct.name} в мессенджере UniHub строго в характере персонажа (ревность, обида, холод, злость, требование объяснений — как ему/ей свойственно). 1–3 предложения, только текст.`);
@@ -963,7 +1034,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 m.status = 'missed'; ch = true;
                 const th = s.threads.find((t) => t.id === m.threadId);
                 if (m.kind === 'official') { addStrike(s, `неявка по вызову — ${m.with}`); continue; }
-                if (th) updateRel(s, th, -6, false);
+                if (th) updateRel(s, th, -6, false, 8, `${s.profile.name} не пришёл(ла) на встречу`);
                 notify(s, `😶 Встреча с ${m.with} прошла без вас.`, 'warn');
                 continue;
             }
@@ -1150,6 +1221,19 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             const lines = ct ? ct.msgs.filter((m) => !m.sys && m.t > since).slice(-8) : [];
             if (lines.length) L.push(`Недавняя переписка в UniHub между ${p.name} и ${ct.name} (обоим она известна, на неё можно ссылаться в истории):\n${lines.map((m) => `${m.me ? p.name : ct.name} (${fmtT(m.t)}): ${m.text}`).join('\n')}`);
         }
+        // отношения: {{char}} — всегда; остальные — пометки только для рассказчика
+        const ctr = s.threads.find((t) => t.kind === 'char');
+        if (ctr && (ctr.status || ctr.msgs.some((m) => m.me) || ctr.conflict)) {
+            const lbl = relLabel(ctr);
+            let line = `Отношения ${ctr.name} и ${p.name} сейчас: ${lbl}${ctr.relNote ? ` (${ctr.relNote})` : ''}.`;
+            if (ctr.conflict) line += ` Они В ССОРЕ — причина: ${ctr.conflict.why}. ${ctr.name} ведёт себя соответственно (обида, холодность, колкости, избегание или выяснение отношений — в характере), пока они не помирятся в истории или в UniHub.`;
+            else if (ctr.reconciled && NOW() - ctr.reconciled.t < DAY) line += ` Недавно помирились после ссоры (${ctr.reconciled.why}) — лёгкая неловкость ещё может ощущаться.`;
+            L.push(line);
+        }
+        const others = s.threads.filter((t) => t.kind === 'dm' && t.msgs.some((m) => m.me) && (t.conflict || t.beef || (t.rel || 0) >= 50 || ((t.flirt || 0) >= 3 && (t.rel || 0) >= 40))).slice(0, 5);
+        if (others.length) L.push(`Для рассказчика — отношения ${p.name} с другими студентами по UniHub (учитывай, только если этот человек появится в сцене; ${ctr ? ctr.name : 'другие персонажи'} об этом не знает, если не был свидетелем и ему не рассказали): ${others.map((t) => `${t.name} — ${t.conflict || t.beef ? `в ссоре с ${p.name}${t.conflict ? ` (${t.conflict.why})` : ''}` : relLabel(t)}`).join('; ')}.`);
+        const beefs = s.threads.filter((t) => t.beef);
+        if (beefs.length) L.push(`Общеизвестно в кампусе: публичный бифф в UniHub между ${p.name} и ${beefs.map((t) => t.name).join(', ')} — студенты это обсуждают, об этом может знать кто угодно.`);
         const so = soc(s), nowT = NOW();
         L.push(`Популярность ${p.name} в UniHub (публично видно): уровень ${levelOf(so)}, ${kfmt(so.followers)} подписчиков.${cancelled(s) ? ` Сейчас ${p.name} «отменяют» в сети — многие студенты настроены враждебно и обсуждают это.` : ''}`);
         for (const m of s.meetings) {
@@ -1318,8 +1402,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     const nameBtn = (name, species) => `<button class="sh-name" data-act="person" data-name="${esc(name)}">${esc(name)}</button>${species ? ` ${badge(species)}` : ''}`;
     function postHTML(p, s, full = false) {
         const n = shownComments(p).length;
-        return `<article class="sh-card sh-post">
-          <div class="sh-post-h">${ava(p.author)}<div>${p.mine ? `<b>${esc(p.author)}</b>` : nameBtn(p.author, '')}${(p.verified !== false && !p.mine) || (p.mine && levelOf(soc(s)) >= 5) ? ' <i class="fa-solid fa-circle-check sh-verified" title="Верифицирован"></i>' : ''}
+        return `<article class="sh-card sh-post ${p.story ? 'story' : ''}">
+          <div class="sh-post-h">${ava(p.author, false, p.species)}<div>${p.mine ? `<b>${esc(p.author)}</b>` : nameBtn(p.author, '')}${(p.verified !== false && !p.mine) || (p.mine && levelOf(soc(s)) >= 5) ? ' <i class="fa-solid fa-circle-check sh-verified" title="Верифицирован"></i>' : ''}
           <small>${p.species ? badge(p.species) : ''} ${esc(CHANNELS[p.channel] || '')}, ${fmtD(p.t)}</small></div></div>
           ${p.story ? `<button class="sh-storytag" data-act="channel" data-ch="story:${esc(p.story)}"><i class="fa-solid fa-book-open"></i> ${esc(p.story)}</button>` : ''}${p.viral ? '<span class="sh-storytag hot"><i class="fa-solid fa-fire"></i> в тренде</span>' : ''}
           <div class="sh-post-t">${esc(p.text)}</div>
@@ -1347,10 +1431,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const chips = { ...CHANNELS, stories: 'Сюжеты', following: 'Подписки', mine: 'Мои посты' };
         if (ui.channel.startsWith('story:')) chips[ui.channel] = `📖 ${ui.channel.slice(6)}`;
         return `
-        <button class="sh-me" data-act="go" data-view="me">${ava(s.profile.name)}<div><b>${esc(s.profile.name)}</b><small>Ур. ${levelOf(soc(s))} · ${kfmt(s.social.followers)} подписчиков · авторитет ${Math.round(s.social.authority)}</small></div><i class="fa-solid fa-chevron-right"></i></button>
+        <button class="sh-me" data-act="go" data-view="me">${ava(s.profile.name, false, s.profile.species)}<div><b>${esc(s.profile.name)}</b><small>Ур. ${levelOf(soc(s))} · ${kfmt(s.social.followers)} подписчиков · авторитет ${Math.round(s.social.authority)}</small></div><i class="fa-solid fa-chevron-right"></i></button>
         ${!s.profile.gender ? '<button class="sh-note warn sh-wide" data-act="go" data-view="profile"><i class="fa-solid fa-venus-mars"></i><span>Укажите свой пол в профиле, чтобы студенты обращались к вам правильно.</span></button>' : ''}
         ${cancelled(s) ? `<div class="sh-note bad"><i class="fa-solid fa-ban"></i><span>Вас «отменяют» ещё ${left(s.social.cancelledUntil, Date.now())}: охваты урезаны, подписчики уходят.</span></div>` : ''}
-        ${authors.length ? `<div class="sh-stories">${authors.map((p) => `<button class="sh-story" data-act="person" data-name="${esc(p.author)}">${ava(p.author, true)}<small>${esc(p.author.split(' ')[0])}</small></button>`).join('')}</div>` : ''}
+        ${authors.length ? `<div class="sh-stories">${authors.map((p) => `<button class="sh-story" data-act="person" data-name="${esc(p.author)}">${ava(p.author, true, p.species || lorePerson(s, p.author)?.species)}<small>${esc(p.author.split(' ')[0])}</small></button>`).join('')}</div>` : ''}
         <div class="sh-chips">${Object.entries(chips).map(([k, v]) => `<button class="sh-chip ${ui.channel === k ? 'on' : ''}" data-act="channel" data-ch="${k}">${esc(k === 'species' && s.profile.species ? s.profile.species : v)}</button>`).join('')}</div>
         <div class="sh-card sh-compose">
           <textarea id="sh-post" rows="2" placeholder="Что нового, ${esc(s.profile.name)}?"></textarea>
@@ -1362,7 +1446,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
     function commentHTML(c, p) {
         const to = c.replyTo ? `<span class="sh-at">@${esc(c.replyTo)}</span> ` : '';
-        return `<div class="sh-cmt ${c.replyTo ? 'reply' : ''} ${c.mine ? 'mine' : ''}">${ava(c.author)}
+        return `<div class="sh-cmt ${c.replyTo ? 'reply' : ''} ${c.mine ? 'mine' : ''}">${ava(c.author, false, c.mine ? S()?.profile.species : c.species)}
           <div><div class="sh-cmt-b">${c.mine ? `<b>${esc(c.author)}</b>` : nameBtn(c.author, c.species)}<p>${to}${esc(c.text)}</p></div>
           <div class="sh-cmt-a"><span>${fmtT(c.t)}</span>
             <button data-act="cLike" data-post="${p.id}" data-id="${c.id}" class="${c.liked ? 'on' : ''}"><i class="fa-${c.liked ? 'solid' : 'regular'} fa-heart"></i> ${c.likes || 0}</button>
@@ -1388,7 +1472,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const posts = s.feed.filter((p) => p.author === name);
         return `${head(name)}
         ${(() => { const lp = lorePerson(s, name); return lp ? `<div class="sh-note"><i class="fa-solid fa-book"></i><span>${badge('из лора')} ${esc(lp.bio)}${lp.faculty ? ` · ${esc(lp.faculty)}` : ''}</span></div>` : ''; })()}
-        <div class="sh-card sh-person">${ava(name, true)}<div><b>${esc(name)}</b>${pr.species ? badge(pr.species) : ''}<small>${kfmt(pr.followers + (pr.following ? 1 : 0))} подписчиков · ${posts.length} постов</small></div></div>
+        <div class="sh-card sh-person">${ava(name, true, pr.species)}<div><b>${esc(name)}</b>${pr.species ? badge(pr.species) : ''}<small>${kfmt(pr.followers + (pr.following ? 1 : 0))} подписчиков · ${posts.length} постов</small></div></div>
         <div class="sh-row"><button class="sh-btn ${pr.following ? 'ghost' : ''}" data-act="follow" data-name="${esc(name)}">${pr.following ? 'Вы подписаны' : 'Подписаться'}</button>
         <button class="sh-btn ghost" data-act="dm" data-name="${esc(name)}" data-species="${esc(pr.species)}"><i class="fa-regular fa-paper-plane"></i> Личное сообщение</button></div>
         <h4>Публикации</h4>${posts.length ? posts.map((p) => postHTML(p, s)).join('') : empty('Постов в ленте пока нет.')}`;
@@ -1417,31 +1501,32 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const posts = s.feed.filter((p) => p.mine);
         const likes = posts.reduce((a, p) => a + (p.likes || 0), 0);
         return `${head('Мой профиль')}
-        <div class="sh-card sh-person">${ava(s.profile.name, true)}<div><b>${esc(s.profile.name)}</b>${s.profile.privacy.species && s.profile.species ? badge(s.profile.species) : ''}</div></div>
+        <div class="sh-card sh-person">${ava(s.profile.name, true, s.profile.species)}<div><b>${esc(s.profile.name)}</b>${s.profile.privacy.species && s.profile.species ? badge(s.profile.species) : ''}</div></div>
         ${statsBlock(s)}
         <div class="sh-stats"><div><b>${kfmt(s.social.followers)}</b><small>подписчиков</small></div><div><b>${s.social.following.length}</b><small>подписок</small></div><div><b>${posts.length}</b><small>постов</small></div><div><b>${kfmt(likes)}</b><small>лайков</small></div></div>
-        ${s.social.following.length ? `<h4>Подписки</h4><div class="sh-stories">${s.social.following.map((n) => `<button class="sh-story" data-act="person" data-name="${esc(n)}">${ava(n, true)}<small>${esc(n.split(' ')[0])}</small></button>`).join('')}</div>` : ''}
+        ${s.social.following.length ? `<h4>Подписки</h4><div class="sh-stories">${s.social.following.map((n) => `<button class="sh-story" data-act="person" data-name="${esc(n)}">${ava(n, true, personOf(s, n)?.species)}<small>${esc(n.split(' ')[0])}</small></button>`).join('')}</div>` : ''}
         <h4>Мои публикации</h4>${posts.length ? posts.map((p) => postHTML(p, s)).join('') : empty('Опубликуйте первый пост — студенты отреагируют в комментариях.')}`;
     }
 
     /* — чаты — */
     function chatsTab(s) {
         const list = [...s.threads].sort((a, b) => b.t - a.t);
-        const typing = (s.pendingDMs || []).map((pd) => `<div class="sh-li static">${ava(pd.from)}<div><b>${esc(pd.isChar ? (s.threads.find((t) => t.kind === 'char')?.name || pd.from) : pd.from)}</b><small class="sh-typing">✍️ пишет вам…</small></div></div>`).join('');
+        const typing = (s.pendingDMs || []).map((pd) => `<div class="sh-li static">${ava(pd.from, false, pd.species)}<div><b>${esc(pd.isChar ? (s.threads.find((t) => t.kind === 'char')?.name || pd.from) : pd.from)}</b><small class="sh-typing">✍️ пишет вам…</small></div></div>`).join('');
         return `<h3 class="sh-h">Сообщения <small><i class="fa-solid fa-lock"></i> сквозное шифрование</small></h3>${typing}
         <div class="sh-row sh-card"><input id="sh-newchat" placeholder="Имя студента или преподавателя"><button class="sh-btn sm" data-act="newChat">Написать</button></div>
         ${list.length ? list.map((t) => {
         const last = t.msgs[t.msgs.length - 1];
-        return `<button class="sh-li" data-act="go" data-view="thread" data-param="${t.id}">${ava(t.name)}<div><b>${esc(t.name)}</b> ${t.kind === 'group' ? badge('группа') : t.kind === 'official' ? badge('официально', 'bad') : t.species ? badge(t.species) : ''}<small>${last ? esc((last.me ? 'Вы: ' : '') + last.text).slice(0, 70) : 'Нет сообщений'}</small></div>${t.unread ? `<b class="sh-dot">${t.unread}</b>` : ''}</button>`;
+        return `<button class="sh-li" data-act="go" data-view="thread" data-param="${t.id}">${t.kind === 'official' ? '<span class="sh-ava" style="background:linear-gradient(135deg,#6b4a4f,#8a6168)"><i class="fa-solid fa-building-columns"></i></span>' : t.kind === 'group' ? '<span class="sh-ava" style="background:linear-gradient(135deg,#4f5a75,#6c7897)"><i class="fa-solid fa-users"></i></span>' : ava(t.name, false, t.species)}<div><b>${esc(t.name)}</b> ${t.kind === 'group' ? badge('группа') : t.kind === 'official' ? badge('официально', 'bad') : t.species ? badge(t.species) : ''}<small>${last ? esc((last.me ? 'Вы: ' : '') + last.text).slice(0, 70) : 'Нет сообщений'}</small></div>${t.unread ? `<b class="sh-dot">${t.unread}</b>` : ''}</button>`;
     }).join('') : empty('Диалогов пока нет. Напишите кому-нибудь из ленты или найдите пару в знакомствах.')}`;
     }
     function threadView(s, id) {
         const th = s.threads.find((t) => t.id === id);
         if (!th) return head('Диалог') + empty('Диалог не найден.');
         th.unread = 0;
-        const rl = relLabel(th), rv = Math.round(th.rel || 0);
+        if (needsRelSync(s, th)) setTimeout(() => syncRel(s, th).catch((e) => logErr('Отношения', e)), 0);
+        const rl = th.relSyncing ? 'определяю отношения…' : relLabel(th), rv = Math.round(th.rel || 0);
         return `${head(th.name, `${th.species ? esc(th.species) + ', ' : ''}<i class="fa-solid fa-lock"></i> зашифровано`)}
-        ${th.kind === 'group' || th.kind === 'official' ? '' : `<div class="sh-rel"><div><small>${rl}${th.beef ? ' · бифф' : ''}${th.kind === 'char' && s.profile.relWithChar ? ' · вы пара' : ''}</small><div class="sh-relbar"><span class="${rv < 0 ? 'neg' : ''}" style="width:${Math.abs(rv) / 2}%;${rv < 0 ? 'right:50%' : 'left:50%'}"></span></div></div>
+        ${th.kind === 'group' || th.kind === 'official' ? '' : `<div class="sh-rel"><div><small>${esc(rl)}${th.beef ? ' · бифф' : ''}${th.kind === 'char' && s.profile.relWithChar && rl !== 'пара' ? ' · вы пара' : ''}${relevantForSync(s, th) && !th.relSyncing ? ` <button class="sh-relsync" data-act="syncRel" data-id="${th.id}" title="${esc(th.relNote || 'Обновить по истории')}" aria-label="Обновить отношения по истории"><i class="fa-solid fa-rotate"></i></button>` : ''}</small><div class="sh-relbar"><span class="${rv < 0 ? 'neg' : ''}" style="width:${Math.abs(rv) / 2}%;${rv < 0 ? 'right:50%' : 'left:50%'}"></span></div></div>
           <button class="sh-btn sm ghost" data-act="go" data-view="meet" data-param="${th.id}"><i class="fa-solid fa-calendar-plus"></i> Встреча</button></div>`}
         ${th.pendingMeet ? `<div class="sh-card sh-pending"><b><i class="fa-solid fa-handshake"></i> Похоже, вы договорились о встрече</b>
           <small>${esc(KINDS[th.pendingMeet.kind])}, ${fmtWhen(th.pendingMeet.at)}, ${esc(PLACES[th.pendingMeet.place])}${th.pendingMeet.note ? ` (${esc(th.pendingMeet.note)})` : ''}</small>
@@ -1468,9 +1553,9 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
           <label>Способности<select id="sh-d-abil">${abilityOptions(s, d.fAbility, 'Любые способности')}</select></label>
           <button class="sh-btn" data-act="genDating"><i class="fa-solid fa-wand-magic-sparkles"></i> Подобрать анкеты</button>
         </div>
-        ${d.matches.length ? `<h4>Взаимные симпатии</h4><div class="sh-stories">${d.matches.map((m) => `<button class="sh-story" data-act="dm" data-name="${esc(m.name)}" data-species="${esc(m.species)}" data-bio="${esc(m.bio)}">${ava(m.name, true)}<small>${esc(m.name.split(' ')[0])}</small></button>`).join('')}</div>` : ''}
+        ${d.matches.length ? `<h4>Взаимные симпатии</h4><div class="sh-stories">${d.matches.map((m) => `<button class="sh-story" data-act="dm" data-name="${esc(m.name)}" data-species="${esc(m.species)}" data-bio="${esc(m.bio)}">${ava(m.name, true, m.species)}<small>${esc(m.name.split(' ')[0])}</small></button>`).join('')}</div>` : ''}
         ${d.profiles.length ? d.profiles.map((p) => `<article class="sh-card sh-profile">
-          <div class="sh-post-h">${ava(p.name, true)}<div><b>${esc(p.name)}, ${esc(p.age)}</b>${p.verified ? ' <i class="fa-solid fa-circle-check sh-verified" title="Верифицирован"></i>' : ''}<small>${badge(p.species)} ${esc(p.faculty || '')}</small></div></div>
+          <div class="sh-post-h">${ava(p.name, true, p.species)}<div><b>${esc(p.name)}, ${esc(p.age)}</b>${p.verified ? ' <i class="fa-solid fa-circle-check sh-verified" title="Верифицирован"></i>' : ''}<small>${badge(p.species)} ${esc(p.faculty || '')}</small></div></div>
           ${p.abilities ? `<p><i class="fa-solid fa-bolt"></i> ${esc(p.abilities)}</p>` : ''}
           <p>${esc(p.bio)}</p>
           <div class="sh-compat"><span style="width:${clamp(+p.compat || 0, 0, 100)}%"></span></div>
@@ -1484,7 +1569,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     const STUDY_TABS = [['schedule', 'Расписание'], ['tasks', 'Задания'], ['grades', 'Оценки'], ['rating', 'Рейтинг'], ['help', 'Помощь']];
     function studyTab(s) {
         const top = `<div class="sh-idcard">
-          ${ava(s.profile.name, true)}
+          ${ava(s.profile.name, true, s.profile.species)}
           <div><b>${esc(s.profile.name)}</b><small>${esc(s.profile.faculty)}, ${s.profile.year} курс</small>${badge(s.profile.species || 'вид не указан')}</div>
           <div class="sh-seal ${rating(s) < 40 ? 'bad' : rating(s) < 70 ? 'warn' : ''}" title="Академический рейтинг"><b>${rating(s)}%</b><small>рейтинг</small></div>
         </div>
@@ -1721,7 +1806,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const p = s.profile, pr = p.privacy;
         const tog = (k, l) => `<label class="sh-toggle"><input type="checkbox" data-change="privacy" data-k="${k}" ${pr[k] ? 'checked' : ''}><span>${l}</span></label>`;
         return `${head('Профиль')}
-        <div class="sh-idcard">${ava(p.name, true)}<div><b>${esc(p.name)}</b><small>${pr.faculty ? esc(p.faculty) : 'факультет скрыт'}, ${p.year} курс</small>${pr.abilities && p.abilities ? badge(p.abilities === NO_ABIL ? 'без способностей' : p.abilities) : ''}${pr.species ? badge(p.species || 'вид не указан') : badge('вид скрыт')}</div></div>
+        <div class="sh-idcard">${ava(p.name, true, p.species)}<div><b>${esc(p.name)}</b><small>${pr.faculty ? esc(p.faculty) : 'факультет скрыт'}, ${p.year} курс</small>${pr.abilities && p.abilities ? badge(p.abilities === NO_ABIL ? 'без способностей' : p.abilities) : ''}${pr.species ? badge(p.species || 'вид не указан') : badge('вид скрыт')}</div></div>
         <button class="sh-me" data-act="go" data-view="me"><span class="sh-star">⭐</span><div><b>Авторитет: ${Math.round(soc(s).authority)}</b><small>Уровень ${levelOf(soc(s))} · ${kfmt(soc(s).followers)} подписчиков · задания дня</small></div><i class="fa-solid fa-chevron-right"></i></button>
         <div class="sh-card sh-form">
           <label>Имя<input id="sh-pf-name" value="${esc(p.name)}"></label>
@@ -1734,10 +1819,20 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         <button class="sh-link" data-act="changeFaculty"><i class="fa-solid fa-right-left"></i> Перевестись на другой факультет</button>`;
     }
 
+    const THEMES = {
+        pearl: ['Лунный жемчуг', ['#1a1824', '#24212f', '#b9a7ec', '#e3b7c8']],
+        forest: ['Туманный лес', ['#151b19', '#1f2724', '#9fcbb0', '#d8c79a']],
+        rose: ['Сумеречная роза', ['#1d1619', '#2a2024', '#e0a9b8', '#c9b6e4']],
+        ocean: ['Полночный океан', ['#121925', '#1b2433', '#8fc3d6', '#b3a8e0']],
+        library: ['Светлая библиотека', ['#f6f2ec', '#ffffff', '#7a6aa8', '#5f8f88']],
+        classic: ['Классика', ['#14111f', '#1f1a30', '#f0b44c', '#8f7cf0']],
+    };
+    function applyTheme() { const ph = document.getElementById('unihub-phone'); if (ph) ph.dataset.theme = THEMES[cfg().theme] ? cfg().theme : 'pearl'; }
     function settingsView(s) {
         const c = cfg();
         const num = (k, l, step = 1) => `<label>${l}<input type="number" step="${step}" data-change="cfg" data-k="${k}" value="${esc(c[k])}"></label>`;
         return `${head('Настройки')}
+        <div class="sh-card"><h4>Оформление</h4><div class="sh-themes">${Object.entries(THEMES).map(([k, [n, sw]]) => `<button class="sh-theme ${(cfg().theme || 'pearl') === k ? 'on' : ''}" data-act="setTheme" data-t="${k}"><div class="sw">${sw.map((x) => `<span style="background:${x}"></span>`).join('')}</div>${n}</button>`).join('')}</div></div>
         ${gameMode(s) ? '<div class="sh-card"><h4>Время учёбы</h4><p class="sh-muted">Включено время истории: пока вы не играете, часы стоят. Управление — нажмите на часы вверху.</p></div>' : ''}
         <div class="sh-card" ${gameMode(s) ? 'style="display:none"' : ''}><h4>Время учёбы</h4><p class="sh-muted">Пары и дедлайны идут по реальному времени. На паузе нарушения не начисляются, а сроки заданий сдвигаются на время паузы.</p>
           <button class="sh-btn ${s.pausedAt ? '' : 'ghost'}" data-act="pause">${s.pausedAt ? `<i class="fa-solid fa-play"></i> Продолжить (на паузе с ${fmtD(s.pausedAt)})` : '<i class="fa-solid fa-pause"></i> Поставить на паузу'}</button></div>
@@ -1745,15 +1840,14 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
           <label class="sh-toggle"><input type="checkbox" data-change="cfgBool" data-k="inject" ${c.inject ? 'checked' : ''}><span>Передавать статус студента ИИ</span></label>
           <label class="sh-toggle"><input type="checkbox" data-change="cfgBool" data-k="shareDMs" ${c.shareDMs ? 'checked' : ''}><span>Передавать переписку UniHub в основной чат</span></label>
           ${num('chatContext', 'Сколько сообщений истории помнит персонаж в UniHub')}
-          ${num('injectDepth', 'Глубина вставки в чат')}
-          <label class="sh-toggle"><input type="checkbox" data-change="cfgBool" data-k="showFab" ${c.showFab ? 'checked' : ''}><span>Плавающая кнопка телефона</span></label></div>
+          ${num('injectDepth', 'Глубина вставки в чат')}</div>
         <div class="sh-card sh-form"><h4>Правила университета</h4>
           ${num('quarterDays', 'Длина четверти, дней')}${num('maxStrikes', 'Нарушений до отчисления')}${num('lowGpa', 'Порог низкого балла', 0.1)}${num('lowGpaDays', 'Дней с низким баллом до отчисления')}
           ${num('checkInEarlyMin', 'Отметка до начала пары, мин')}${num('deadlineOffsetMin', 'Дедлайн до следующей пары, мин')}${num('extraTaskHours', 'Срок доп. задания, ч')}
           ${num('stipend', 'Стипендия, ₡')}${num('stipendMinGpa', 'Мин. балл для стипендии', 0.1)}${num('startBalance', 'Стартовый баланс (новые чаты), ₡')}</div>
         <button class="sh-btn ghost wide" data-act="go" data-view="log"><i class="fa-solid fa-bug"></i> Журнал ошибок (${LOG.length})</button>
         <div class="sh-card"><h4>Люди из лора</h4>
-          ${lorePeople(s).length ? lorePeople(s).map((p) => `<div class="sh-li static">${ava(p.name)}<div><b>${esc(p.name)}</b><small>${esc([p.species, p.faculty, p.year ? `${p.year} курс` : ''].filter(Boolean).join(', '))}</small></div></div>`).join('') : '<p class="sh-muted">Студенты из лорбука и карточки ещё не найдены.</p>'}
+          ${lorePeople(s).length ? lorePeople(s).map((p) => `<div class="sh-li static">${ava(p.name, false, p.species)}<div><b>${esc(p.name)}</b><small>${esc([p.species, p.faculty, p.year ? `${p.year} курс` : ''].filter(Boolean).join(', '))}</small></div></div>`).join('') : '<p class="sh-muted">Студенты из лорбука и карточки ещё не найдены.</p>'}
           ${lorePeople(s, 'staff').length ? `<small>Преподаватели и сотрудники: ${esc(lorePeople(s, 'staff').map((p) => p.name).join(', '))}</small>` : ''}
           <small>Родители, родственники и люди вне университета в приложение не попадают.</small>
           <button class="sh-btn sm ghost" data-act="refreshLorePeople"><i class="fa-solid fa-rotate"></i> Обновить из лора</button></div>
@@ -1763,7 +1857,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.10.1 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.11.2 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -1791,7 +1885,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     /* ───────────────────────── рендер ───────────────────────── */
 
     function updateFab() {
-        const fab = byId('unihub-fab');
+        const fab = null;
         if (!fab) return;
         fab.style.display = cfg().showFab && !ui.open ? 'flex' : 'none';
         const s = S();
@@ -1879,13 +1973,14 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             : th.kind === 'char'
                 ? `${th.name} — персонажа текущей истории. Строго сохраняй его характер, отношение к ${s.profile.name}, манеру речи и словечки из карточки и примеров; учитывай события истории. Пиши так, как этот персонаж писал бы в мессенджере.`
                 : `${th.name}${th.species ? ` (вид: ${th.species})` : ''}${th.bio ? `. О себе: ${th.bio}` : ''}`;
-        const relTxt = th.kind === 'group' ? '' : `\nОтношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100, шкала от −100 вражда до 100 близость).${th.kind === 'char' && s.profile.relWithChar ? ` ${th.name} и ${s.profile.name} — пара.` : ''}${jealousNote(s, th)}`;
+        const relTxt = th.kind === 'group' ? '' : `\nОтношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100, шкала от −100 вражда до 100 близость).${th.relNote ? ` ${th.relNote}` : ''}${relLabel(th) === 'не знакомы' ? ` Они не знакомы — ${th.name} пишет как незнакомому человеку.` : ''}${th.kind === 'char' && s.profile.relWithChar ? ` ${th.name} и ${s.profile.name} — пара.` : ''}${jealousNote(s, th)}`;
         const raw = await aiRaw(`${world(s)}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist || '(переписки ещё не было)'}\n\n${opts.initiate ? `${opts.initiate}\n\n` : ''}Напиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date(NOW()).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(NOW())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
         th.typing = false;
         if (S() !== s) return;
         const js = th.kind === 'group' ? null : parseJSON(raw);
         let r = js && typeof js.reply === 'string' ? js.reply : stripThink(raw).trim().replace(/^["«]+|["»]+$/g, '');
-        if (js && th.kind !== 'group') updateRel(s, th, Number(js.delta) || 0, js.flirt === true || js.flirt === 'true');
+        const lastMine = [...th.msgs].reverse().find((m) => m.me);
+        if (js && th.kind !== 'group') updateRel(s, th, Number(js.delta) || 0, js.flirt === true || js.flirt === 'true', 8, lastMine ? `переписка в UniHub: ${s.profile.name} написал(а) «${lastMine.text.slice(0, 140)}»` : '');
         if (js?.meet && typeof js.meet === 'object') detectMeet(s, th, js.meet);
         if (r) {
             let from;
@@ -1956,7 +2051,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         if (pd.isChar) {
             th = s.threads.find((t) => t.kind === 'char');
             const c = ctx();
-            if (!th && c.name2 && !c.groupId) { th = { id: uid(), name: c.name2, species: '', bio: '', kind: 'char', msgs: [], t: Date.now(), unread: 0, rel: 40 }; s.threads.push(th); }
+            if (!th && c.name2 && !c.groupId) { th = { id: uid(), name: c.name2, species: '', bio: '', kind: 'char', msgs: [], t: Date.now(), unread: 0, rel: 0 }; s.threads.push(th); }
         }
         if (!th) {
             th = s.threads.find((t) => t.name.toLowerCase() === pd.from.toLowerCase());
@@ -2045,7 +2140,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 s.auth = true; s.enforceFrom = NOW(); s.quarter = { n: 1, start: NOW() };
                 s.expelled = false; s.expelReason = '';
                 const c = ctx();
-                if (c.name2 && !c.groupId && !s.threads.some((t) => t.kind === 'char')) s.threads.push({ id: uid(), name: c.name2, species: '', bio: '', kind: 'char', msgs: [], t: NOW(), unread: 0, rel: 40 });
+                if (c.name2 && !c.groupId && !s.threads.some((t) => t.kind === 'char')) s.threads.push({ id: uid(), name: c.name2, species: '', bio: '', kind: 'char', msgs: [], t: NOW(), unread: 0, rel: 0 });
                 notify(s, `🎓 Добро пожаловать, ${s.profile.name}! Расписание факультета «${fac}» готово.`, 'important');
                 ui.tab = 'study'; ui.studyTab = 'schedule'; ui.view = null;
                 save(s);
@@ -2184,7 +2279,7 @@ ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species}
             const sameDay = dkey(m.at) === dkey(NOW());
             notify(s, `❌ Встреча с ${m.with} отменена.`, 'social');
             if (th) {
-                updateRel(s, th, sameDay ? -5 : -2, false);
+                updateRel(s, th, sameDay ? -5 : -2, false, 8, `${s.profile.name} отменил(а) встречу${sameDay ? ' в последний момент' : ''}`);
                 th.msgs.push({ me: true, text: `❌ Прости, не получится ${fmtWhen(m.at)} — отменяю встречу.`, t: NOW() });
                 save(s); render();
                 return reply(s, th);
@@ -2225,6 +2320,7 @@ ${story}
                 else toast('info', `Пока не засчитано: ${cleanMsg(r?.comment || 'в истории не видно выполнения')}`);
             });
         },
+        setTheme: (d) => { cfg().theme = d.t; saveCfg(); applyTheme(); render(); },
         timeMode: (d, el, s) => {
             if (d.m === 'game' && !gameMode(s)) { s.clock.mode = 'game'; s.clock.t = Math.max(s.clock.t || 0, Date.now()); s.clock.source = 'включено'; }
             else if (d.m === 'real') s.clock.mode = 'real';
@@ -2282,6 +2378,7 @@ ${story}
             fillChatInput(`*${s.profile.name} идёт на занятие клуба «${d.c}».*`);
             toggle(false);
         },
+        syncRel: (d, el, s) => { const th = s.threads.find((t) => t.id === d.id); if (th) { th.relSyncLen = undefined; return syncRel(s, th); } },
         cLike: (d, el, s) => {
             const c = s.feed.find((x) => x.id === d.post)?.comments?.find((x) => x.id === d.id);
             if (!c) return;
@@ -2703,18 +2800,12 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
 
     function mount() {
         if (byId('unihub-phone')) return;
-        const fab = document.createElement('button');
-        fab.id = 'unihub-fab';
-        fab.type = 'button';
-        fab.style.cssText = 'position:fixed;right:18px;bottom:110px;z-index:2147483000;display:flex;';
-        fab.title = 'UniHub';
-        fab.innerHTML = '<i class="fa-solid fa-mobile-screen-button"></i><b class="sh-fab-badge"></b>';
-        fab.addEventListener('click', () => toggle());
-        document.body.appendChild(fab);
+
 
         const ph = document.createElement('div');
         ph.id = 'unihub-phone';
         ph.innerHTML = '<div class="sh-status"></div><div class="sh-screen"></div><nav class="sh-nav"></nav><div class="sh-overlay"></div>';
+        ph.dataset.theme = THEMES[cfg().theme] ? cfg().theme : 'pearl';
         ph.addEventListener('click', onClick);
         ph.addEventListener('change', onChange);
         ph.addEventListener('keydown', onKey);
@@ -2735,14 +2826,12 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
             box.insertAdjacentHTML('beforeend', `<div class="unihub-settings"><div class="inline-drawer">
               <div class="inline-drawer-toggle inline-drawer-header"><b>UniHub</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
               <div class="inline-drawer-content">
-                <label class="checkbox_label"><input type="checkbox" id="sh-cfg-fab"> <span>Плавающая кнопка телефона</span></label>
                 <label class="checkbox_label"><input type="checkbox" id="sh-cfg-inject"> <span>Передавать статус студента ИИ</span></label>
                 <div class="menu_button" id="sh-cfg-open"><i class="fa-solid fa-mobile-screen-button"></i> Открыть UniHub</div>
                 <div class="menu_button" id="sh-cfg-log"><i class="fa-solid fa-bug"></i> Журнал ошибок</div>
               </div></div></div>`);
-            const f = byId('sh-cfg-fab'), i = byId('sh-cfg-inject');
-            f.checked = !!cfg().showFab; i.checked = !!cfg().inject;
-            f.addEventListener('change', () => { cfg().showFab = f.checked; saveCfg(); updateFab(); });
+            const i = byId('sh-cfg-inject');
+            i.checked = !!cfg().inject;
             i.addEventListener('change', () => { cfg().inject = i.checked; saveCfg(); updateInjection(); });
             byId('sh-cfg-open').addEventListener('click', () => toggle(true));
             byId('sh-cfg-log').addEventListener('click', () => { ui.view = 'log'; toggle(true); });
@@ -2751,7 +2840,7 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
 
     function checkFab() {
         const fab = byId('unihub-fab');
-        if (!fab) return logErr('Плавающая кнопка', 'элемент не создан');
+        if (!fab) return;
         if (!cfg().showFab) return;
         const r = fab.getBoundingClientRect(), cs = getComputedStyle(fab);
         const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
