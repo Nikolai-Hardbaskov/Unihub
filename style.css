@@ -372,8 +372,6 @@
 #unihub-phone .sh-btn { color: var(--sh-on) !important; }
 #unihub-phone .sh-btn.ghost { color: var(--sh-amber) !important; background: transparent !important; }
 #unihub-phone .sh-btn.danger { color: #fff !important; }
-#unihub-phone .sh-toggle input { appearance: auto !important; -webkit-appearance: checkbox !important; width: 18px !important; height: 18px !important; margin: 0 !important; flex-shrink: 0; }
-#unihub-phone .sh-toggle { flex-direction: row !important; flex-wrap: nowrap; }
 
 /* ───── темы ───── */
 #unihub-phone { --sh-on: #1b1307; --sh-me: #3a2f63; --sh-card2: #251d3c; --sh-frame: #07060b; }
@@ -399,3 +397,26 @@
 #unihub-phone .sh-theme .sw span { flex: 1; }
 
 #unihub-phone .sh-relsync { background: none; border: 0; padding: 0 4px; color: var(--sh-mute); font-size: 11px; cursor: pointer; }
+
+/* собственный переключатель — не зависит от темы SillyTavern */
+#unihub-phone .sh-toggle { display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important; gap: 12px !important; padding: 8px 0 !important; margin: 0 !important; cursor: pointer; }
+#unihub-phone .sh-toggle span { flex: 1 1 auto; display: block; line-height: 1.35; }
+#unihub-phone .sh-toggle input[type='checkbox'] {
+    -webkit-appearance: none !important; appearance: none !important;
+    position: relative !important; flex: 0 0 auto !important; display: inline-block !important;
+    width: 42px !important; height: 24px !important; min-width: 42px !important; margin: 0 !important; padding: 0 !important;
+    border-radius: 12px !important; border: 1px solid var(--sh-line) !important;
+    background: var(--sh-card2) none !important; box-shadow: none !important; outline: none;
+    transition: background .2s, border-color .2s; cursor: pointer; filter: none !important; opacity: 1 !important; transform: none !important;
+}
+#unihub-phone .sh-toggle input[type='checkbox']::before {
+    content: '' !important; position: absolute !important; top: 2px !important; left: 2px !important;
+    width: 18px !important; height: 18px !important; border-radius: 50% !important;
+    background: var(--sh-mute) !important; transition: transform .2s, background .2s; box-shadow: none !important; border: 0 !important;
+    display: block !important; margin: 0 !important; transform: translateX(0);
+}
+#unihub-phone .sh-toggle input[type='checkbox']::after { content: none !important; display: none !important; }
+#unihub-phone .sh-toggle input[type='checkbox']:checked { background: var(--sh-amber) none !important; border-color: var(--sh-amber) !important; }
+#unihub-phone .sh-toggle input[type='checkbox']:checked::before { background: var(--sh-on) !important; transform: translateX(18px) !important; }
+#unihub-phone .sh-toggle input[type='checkbox']:focus-visible { outline: 2px solid var(--sh-amber); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { #unihub-phone .sh-toggle input, #unihub-phone .sh-toggle input::before { transition: none !important; } }
