@@ -174,6 +174,48 @@
     const MARKET_CATS = ['Учебники', 'Мебель', 'Электроника', 'Оборудование'];
     const CLUBS = ['Клуб ночных астрономов', 'Хор сирен', 'Лига регби оборотней', 'Кружок зельеварения', 'Дебатный клуб «Меж видов»', 'Фотоклуб «Без отражения»'];
     const ROOMS = ['Лаборатория алхимии', 'Звукоизолированная комната (полнолуние)', 'Читальный зал без окон', 'Бассейн с морской водой', 'Огнеупорный тренировочный зал', 'Переговорная'];
+    const MUNDANE_MENU = [
+        { title: 'Капучино', place: 'Кофейня у библиотеки', price: 90, tags: ['кофе'] },
+        { title: 'Круассан с миндалём', place: 'Кофейня у библиотеки', price: 80, tags: ['выпечка', 'вегетарианское'] },
+        { title: 'Бизнес-ланч', place: 'Столовая №1', price: 160, tags: ['обычное'] },
+        { title: 'Пицца «Маргарита»', place: 'Пиццерия «Кампус»', price: 240, tags: ['вегетарианское'] },
+        { title: 'Поке с лососем', place: 'Поке-бар', price: 280, tags: ['рыба'] },
+        { title: 'Боул с киноа и авокадо', place: 'Зелёная кухня', price: 210, tags: ['веганское'] },
+        { title: 'Шаурма', place: 'Шаурма у общаги', price: 150, tags: ['обычное'] },
+        { title: 'Сет роллов', place: 'Суши-бар', price: 350, tags: ['рыба'] },
+        { title: 'Сэндвич без глютена', place: 'Зелёная кухня', price: 170, tags: ['без глютена'] },
+        { title: 'Плов', place: 'Столовая №2', price: 170, tags: ['халяль'] },
+    ];
+    const MUNDANE_MARKET = [
+        { title: 'Учебник «Микроэкономика»', cat: 'Учебники', price: 450, rent: 70, seller: 'Ира, 3 курс', rating: 4.8, verified: true },
+        { title: 'Конспекты по матанализу', cat: 'Учебники', price: 150, rent: 0, seller: 'Дима, 2 курс', rating: 4.5, verified: false },
+        { title: 'Настольная лампа', cat: 'Мебель', price: 400, rent: 0, seller: 'Катя, 4 курс', rating: 4.6, verified: true },
+        { title: 'Офисное кресло', cat: 'Мебель', price: 1300, rent: 0, seller: 'Общежитие №2', rating: 4.2, verified: true },
+        { title: 'Ноутбук б/у', cat: 'Электроника', price: 6500, rent: 600, seller: 'Артём, 5 курс', rating: 4.3, verified: false },
+        { title: 'Наушники с шумоподавлением', cat: 'Электроника', price: 2400, rent: 250, seller: 'Лена, 1 курс', rating: 4.7, verified: true },
+        { title: 'Графический калькулятор', cat: 'Оборудование', price: 1500, rent: 200, seller: 'Кафедра математики', rating: 5, verified: true },
+        { title: 'Мини-холодильник для общаги', cat: 'Оборудование', price: 2200, rent: 300, seller: 'Саша, 3 курс', rating: 4.4, verified: false },
+    ];
+    const MUNDANE_CLUBS = ['Студенческий театр', 'Дебатный клуб', 'Фотоклуб', 'Клуб настольных игр', 'Волейбольная секция', 'Студенческое радио'];
+    const MUNDANE_ROOMS = ['Переговорная', 'Читальный зал', 'Компьютерный класс', 'Спортзал', 'Музыкальная студия', 'Актовый зал'];
+    const MUNDANE_FACULTIES = [
+        { name: 'Экономический факультет', desc: 'Экономика, финансы, менеджмент.', source: 'invented' },
+        { name: 'Юридический факультет', desc: 'Право, судебная практика, криминалистика.', source: 'invented' },
+        { name: 'Медицинский факультет', desc: 'Лечебное дело и анатомия.', source: 'invented' },
+        { name: 'Факультет журналистики', desc: 'Медиа, репортажи, редактура.', source: 'invented' },
+        { name: 'Факультет информационных технологий', desc: 'Программирование и данные.', source: 'invented' },
+        { name: 'Факультет психологии', desc: 'Клиническая и социальная психология.', source: 'invented' },
+        { name: 'Филологический факультет', desc: 'Литература, лингвистика, перевод.', source: 'invented' },
+        { name: 'Исторический факультет', desc: 'История, архивное дело, археология.', source: 'invented' },
+        { name: 'Факультет международных отношений', desc: 'Дипломатия, политология, языки.', source: 'invented' },
+        { name: 'Физико-математический факультет', desc: 'Физика, математика, моделирование.', source: 'invented' },
+        { name: 'Биологический факультет', desc: 'Биология, экология, генетика.', source: 'invented' },
+        { name: 'Факультет искусств и дизайна', desc: 'Графика, дизайн, живопись.', source: 'invented' },
+        { name: 'Архитектурный факультет', desc: 'Архитектура и градостроительство.', source: 'invented' },
+        { name: 'Факультет социологии', desc: 'Общество, исследования, медиа.', source: 'invented' },
+    ];
+    const mundane = (s) => s?.world === 'mundane';
+    const SP = (s, v) => (mundane(s) ? '' : String(v || '').slice(0, 40));
     const CHANNELS = { all: 'Все', general: 'Общее', study: 'Учёба', clubs: 'Клубы', dorms: 'Общежития', species: 'Мой вид' };
     const CONSEQ = [
         'Куратор вызывает студента в деканат для объяснений.',
@@ -432,6 +474,7 @@
     /** Как окружающие реагируют на вид и способности пользователя. */
     function reactionGuide(s) {
         const p = s.profile, L = [];
+        if (mundane(s)) return '';
         if (p.species) L.push(`Студенты и преподаватели реагируют на то, что ${p.name} — ${p.species}: в зависимости от своего вида (симпатия, опаска, предрассудки, давнее соперничество видов, любопытство, гастрономический интерес и т.п.)${/^человек$/i.test(p.species) ? '; обычный человек среди сверхъестественных — редкость и повод для удивления' : ''}.`);
         if (p.abilities === NO_ABIL) L.push(`У ${p.name} НЕТ сверхъестественных способностей. Окружающие искренне удивляются этому, переспрашивают, недоумевают, сочувствуют или подшучивают.`);
         else if (p.abilities && p.abilityVisible) L.push(`Способность ${p.name} («${p.abilities}») заметна со стороны: окружающие её видят и реагируют — восхищаются, опасаются, завидуют, задают вопросы.`);
@@ -448,6 +491,7 @@
     }
     function world(s) {
         const p = s.profile;
+        if (mundane(s)) return `Мир: обычный университет в реальном современном мире. Никакой магии, мистики и сверхъестественных существ — все студенты и преподаватели обычные люди, без видов и способностей. Не упоминай магию, расы, виды и способности ни в каком виде; еда, предметы, клубы, события и задания — реалистичные, как в настоящем вузе.\n${charInfo()}\n${genderRule(p)}\nСтудент-пользователь: ${p.name}; пол: ${GENDERS[p.gender] || 'не указан'}; факультет: ${p.faculty || 'не выбран'}; курс: ${p.year}.`;
         return `Мир: университет, где учатся люди, полулюди и сверхъестественные виды.\n${charInfo()}\n${genderRule(p)}\nСтудент-пользователь: ${p.name}; пол: ${GENDERS[p.gender] || 'не указан'}; вид: ${p.species || 'не указан'}; способности: ${abilityInfo(p)}; факультет: ${p.faculty || 'не выбран'}; курс: ${p.year}.\n${reactionGuide(s)}`;
     }
     async function loreText(filterRe) {
@@ -486,13 +530,15 @@
 
     async function loadFaculties(s) {
         const lore = await loreText(/факульт|faculty|кафедр|университет|академи|колледж|институт|school|college|department|major/i);
-        const r = await aiJSON(`${world(s)}\n\nЛор (лорбук и карточка):\n${lore || '(нет данных)'}\n\nЗадача: определи список факультетов университета. Если факультеты упомянуты в лоре или описании персонажа — используй ИМЕННО их и пометь source "lore". Если информации нет — придумай 5–7 оригинальных факультетов, подходящих этому миру, source "invented".\nФормат: [{"name":"...","desc":"одно предложение","source":"lore"}]`);
+        const r = await aiJSON(`${world(s)}\n\nЛор (лорбук и карточка):\n${lore || '(нет данных)'}\n\nЗадача: определи список факультетов университета. Если факультеты упомянуты в лоре или описании персонажа — используй ИМЕННО их и пометь source "lore". Если информации нет — придумай 8–10 разнообразных факультетов, подходящих этому миру (гуманитарные, естественные, творческие, прикладные), source "invented". Если в лоре факультетов меньше 4 — дополни их придуманными.\nФормат: [{"name":"...","desc":"одно предложение","source":"lore"}]`);
         const list = Array.isArray(r) ? r.filter((f) => f && f.name).map((f) => ({ name: String(f.name).slice(0, 80), desc: String(f.desc || '').slice(0, 160), source: f.source === 'lore' ? 'lore' : 'invented' })) : [];
-        return list.length ? list : FALLBACK_FACULTIES;
+        return list.length ? list : (mundane(s) ? MUNDANE_FACULTIES : FALLBACK_FACULTIES);
     }
 
     function fallbackSchedule(fac) {
-        const subj = [`Введение в профессию: ${fac}`, 'История сверхъестественных видов', 'Межвидовая этика', 'Практикум способностей', 'Иностранный язык', 'Физическая подготовка', 'Основы безопасности кампуса'];
+        const subj = mundane(S())
+            ? [`Введение в профессию: ${fac}`, 'История', 'Философия', 'Иностранный язык', 'Физическая культура', 'Высшая математика', 'Основы права']
+            : [`Введение в профессию: ${fac}`, 'История сверхъестественных видов', 'Межвидовая этика', 'Практикум способностей', 'Иностранный язык', 'Физическая подготовка', 'Основы безопасности кампуса'];
         const slots = [['09:00', '10:30'], ['10:45', '12:15'], ['13:00', '14:30'], ['14:45', '16:15']];
         const out = [];
         let i = 0;
@@ -854,7 +900,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         notify(s, `🚫 Вас «отменили» в UniHub! −${kfmt(lost)} подписчиков, охваты рухнули на сутки.`, 'bad');
         enqueue(s, async () => {
             const r = await aiJSON(`${world(s)}\n\nСтуденты UniHub устроили травлю ${s.profile.name} за спорные посты и комментарии. Сгенерируй 2 поста разных студентов об этой «отмене»: возмущение, мемы, кто-то заступается. Всё на русском.\nФормат: [{"author":"","species":"","text":"до 250 символов"}]`);
-            for (const x of Array.isArray(r) ? r : []) if (x && x.author && x.text) s.feed.unshift({ id: uid(), author: cleanName(x.author), species: String(x.species || '').slice(0, 40), channel: 'general', text: cleanMsg(x.text).slice(0, 500), likes: 50 + Math.floor(Math.random() * 500), t: Date.now(), comments: [], story: `Отмена ${s.profile.name}` });
+            for (const x of Array.isArray(r) ? r : []) if (x && x.author && x.text) s.feed.unshift({ id: uid(), author: cleanName(x.author), species: SP(s, x.species), channel: 'general', text: cleanMsg(x.text).slice(0, 500), likes: 50 + Math.floor(Math.random() * 500), t: Date.now(), comments: [], story: `Отмена ${s.profile.name}` });
         });
     }
     /** Оценка поста или комментария пользователя сообществом. */
@@ -1194,6 +1240,40 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         save(s);
         return s.lorePeople.length;
     }
+    /* ───────────────────────── кампус из лора ───────────────────────── */
+
+    function clubsOf(s) {
+        const gen = (s.genClubs || []).map((c) => c.name);
+        const base = gen.length ? gen : (mundane(s) ? MUNDANE_CLUBS : CLUBS);
+        return [...new Set([...(s.loreClubs || []), ...s.clubs, ...base])];
+    }
+    const clubDesc = (s, name) => (s.genClubs || []).find((c) => c.name === name)?.desc || '';
+    /** ИИ придумывает клубы под мир и факультеты — в дополнение к клубам из лора. */
+    async function genClubs(s) {
+        const facs = s.faculties.map((f) => f.name).join(', ') || s.profile.faculty;
+        const have = [...(s.loreClubs || []), ...s.clubs].join(', ');
+        const r = await aiJSON(`${world(s)}\n\nПридумай 6 разнообразных студенческих клубов и секций этого университета: творческие, спортивные, научные, по интересам и связанные с факультетами (${facs || 'факультеты не указаны'}).${mundane(s) ? ' Только реалистичные клубы обычного вуза, без магии.' : ' Клубы в духе этого сверхъестественного мира.'}${have ? ` Не повторяй уже существующие: ${have}.` : ''}\nФормат: [{"name":"название","desc":"чем занимаются, одно короткое предложение"}]`);
+        if (S() !== s) return 0;
+        const list = (Array.isArray(r) ? r : []).filter((c) => c && c.name).map((c) => ({ name: cleanMsg(c.name).slice(0, 60), desc: cleanMsg(c.desc || '').slice(0, 140) })).slice(0, 8);
+        s.genClubsAt = Date.now();
+        if (list.length) s.genClubs = list;
+        save(s);
+        return list.length;
+    }
+    /** Клубы, мероприятия и традиции университета, описанные в лорбуке и карточке. */
+    async function extractCampusLore(s) {
+        const lore = await loreText(/клуб|секци|кружок|обществ|команд|мероприят|праздник|бал|фестивал|турнир|концерт|вечеринк|традици|ярмарк|club|event|society|festival|party|tradition/i);
+        s.campusLoreAt = Date.now();
+        if (!lore) { save(s); return 0; }
+        const r = await aiJSON(`${world(s)}\n\nЛор (лорбук и карточка):\n${lore}\n\nВыпиши ТОЛЬКО то, что реально упомянуто в лоре: студенческие клубы, секции и сообщества этого университета, а также мероприятия и традиции кампуса. Ничего не придумывай; если чего-то нет — пустой массив.\nФормат: {"clubs":["название"],"events":[{"title":"","when":"когда проходит","place":"","desc":"одно предложение"}]}`);
+        if (S() !== s || !r || typeof r !== 'object') return 0;
+        s.loreClubs = [...new Set((Array.isArray(r.clubs) ? r.clubs : []).map((x) => cleanMsg(typeof x === 'string' ? x : x?.name || '').slice(0, 60)).filter(Boolean))].slice(0, 12);
+        const ev = (Array.isArray(r.events) ? r.events : []).filter((e) => e && e.title).slice(0, 6).map((e) => ({ id: uid(), title: cleanMsg(e.title).slice(0, 80), when: cleanMsg(e.when || '').slice(0, 50), place: cleanMsg(e.place || '').slice(0, 60), desc: cleanMsg(e.desc || '').slice(0, 200), going: false, lore: true }));
+        s.events = [...ev, ...s.events.filter((e) => !e.lore)].slice(0, 12);
+        save(s);
+        return s.loreClubs.length + ev.length;
+    }
+
     /* ───────────────────────── инъекция в промпт ───────────────────────── */
 
     function buildInjection() {
@@ -1310,11 +1390,20 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
 
     /* — вход — */
+    function worldChoice() {
+        return `<div class="sh-auth">
+          <div class="sh-crest"><i class="fa-solid fa-graduation-cap"></i><h2>UniHub</h2><p>Где вы учитесь?</p></div>
+          <button class="sh-world" data-act="pickWorld" data-w="magic"><i class="fa-solid fa-wand-magic-sparkles"></i><div><b>Сверхъестественный университет</b><small>Люди, полулюди и магические виды. Способности, лор и магия.</small></div></button>
+          <button class="sh-world" data-act="pickWorld" data-w="mundane"><i class="fa-solid fa-building-columns"></i><div><b>Обычный университет</b><small>Реальный мир без магии. Только люди: имя, пол и факультет.</small></div></button>
+        </div>`;
+    }
     function authView(s) {
+        if (!s.world) return worldChoice();
         const p = s.profile;
         const known = s.faculties.some((f) => f.name === p.faculty);
         return `<div class="sh-auth">
           <div class="sh-crest"><i class="fa-solid fa-graduation-cap"></i><h2>UniHub</h2><p>Вход через университетскую учётную запись</p></div>
+          <div class="sh-note"><i class="fa-solid ${mundane(s) ? 'fa-building-columns' : 'fa-wand-magic-sparkles'}"></i><span>${mundane(s) ? 'Обычный университет' : 'Сверхъестественный университет'}</span><button class="sh-link" data-act="pickWorld" data-w="">изменить</button></div>
           <label>Имя студента<input id="sh-a-name" value="${esc(p.name)}"></label>
           ${identityFields('sh-a', p)}
           <h4>Факультет</h4>
@@ -1343,6 +1432,9 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
           ${Object.entries(ABILITY_GROUPS).map(([g, list]) => `<optgroup label="${esc(g)}">${list.map((x) => opt(x.replace(/\+$/, ''))).join('')}</optgroup>`).join('')}`;
     }
     function identityFields(pre, p) {
+        if (mundane(S())) return `
+          <label>Пол<select id="${pre}-gender"><option value="">— выберите —</option>${Object.entries(GENDERS).map(([k, v]) => `<option value="${k}" ${p.gender === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+          <label>Курс<select id="${pre}-year">${Array.from({ length: MAX_YEAR }, (_, i) => `<option value="${i + 1}" ${+p.year === i + 1 ? 'selected' : ''}>${i + 1} курс</option>`).join('')}</select></label>`;
         const lore = S()?.loreSpecies || [];
         const spKnown = SPECIES.includes(p.species) || lore.includes(p.species);
         const abKnown = p.abilities === NO_ABIL || ABILITIES.some((a) => a.n === p.abilities) || (S()?.loreAbilities || []).some((a) => a.n === p.abilities);
@@ -1429,6 +1521,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         });
         const authors = [...new Map([...lorePeople(s).map((p) => [p.name, { author: p.name }]), ...s.feed.filter((p) => !p.mine).map((p) => [p.author, p])]).values()].slice(0, 14);
         const chips = { ...CHANNELS, stories: 'Сюжеты', following: 'Подписки', mine: 'Мои посты' };
+        if (mundane(s)) delete chips.species;
         if (ui.channel.startsWith('story:')) chips[ui.channel] = `📖 ${ui.channel.slice(6)}`;
         return `
         <button class="sh-me" data-act="go" data-view="me">${ava(s.profile.name, false, s.profile.species)}<div><b>${esc(s.profile.name)}</b><small>Ур. ${levelOf(soc(s))} · ${kfmt(s.social.followers)} подписчиков · авторитет ${Math.round(s.social.authority)}</small></div><i class="fa-solid fa-chevron-right"></i></button>
@@ -1549,17 +1642,17 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         <div class="sh-seg"><button class="${d.mode === 'love' ? 'on' : ''}" data-act="dMode" data-mode="love">Свидания</button><button class="${d.mode === 'friends' ? 'on' : ''}" data-act="dMode" data-mode="friends">Друзья</button></div>
         <div class="sh-card sh-form">
           <label>Кого показывать<select id="sh-d-gender"><option value="" ${!d.fGender ? 'selected' : ''}>Всех</option><option value="m" ${d.fGender === 'm' ? 'selected' : ''}>Парней</option><option value="f" ${d.fGender === 'f' ? 'selected' : ''}>Девушек</option><option value="nb" ${d.fGender === 'nb' ? 'selected' : ''}>Небинарных</option></select></label>
-          <label>Вид<select id="sh-d-species">${speciesOptions(s, d.fSpecies, 'Любой вид')}</select></label>
-          <label>Способности<select id="sh-d-abil">${abilityOptions(s, d.fAbility, 'Любые способности')}</select></label>
+          ${mundane(s) ? '' : `<label>Вид<select id="sh-d-species">${speciesOptions(s, d.fSpecies, 'Любой вид')}</select></label>
+          <label>Способности<select id="sh-d-abil">${abilityOptions(s, d.fAbility, 'Любые способности')}</select></label>`}
           <button class="sh-btn" data-act="genDating"><i class="fa-solid fa-wand-magic-sparkles"></i> Подобрать анкеты</button>
         </div>
         ${d.matches.length ? `<h4>Взаимные симпатии</h4><div class="sh-stories">${d.matches.map((m) => `<button class="sh-story" data-act="dm" data-name="${esc(m.name)}" data-species="${esc(m.species)}" data-bio="${esc(m.bio)}">${ava(m.name, true, m.species)}<small>${esc(m.name.split(' ')[0])}</small></button>`).join('')}</div>` : ''}
         ${d.profiles.length ? d.profiles.map((p) => `<article class="sh-card sh-profile">
-          <div class="sh-post-h">${ava(p.name, true, p.species)}<div><b>${esc(p.name)}, ${esc(p.age)}</b>${p.verified ? ' <i class="fa-solid fa-circle-check sh-verified" title="Верифицирован"></i>' : ''}<small>${badge(p.species)} ${esc(p.faculty || '')}</small></div></div>
+          <div class="sh-post-h">${ava(p.name, true, p.species)}<div><b>${esc(p.name)}, ${esc(p.age)}</b>${p.verified ? ' <i class="fa-solid fa-circle-check sh-verified" title="Верифицирован"></i>' : ''}<small>${p.species ? badge(p.species) : ''}${p.faculty ? badge(p.faculty, 'fac') : ''}</small></div></div>
           ${p.abilities ? `<p><i class="fa-solid fa-bolt"></i> ${esc(p.abilities)}</p>` : ''}
           <p>${esc(p.bio)}</p>
           <div class="sh-compat"><span style="width:${clamp(+p.compat || 0, 0, 100)}%"></span></div>
-          <small class="sh-muted">Совместимость видов ${clamp(+p.compat || 0, 0, 100)}%. ${esc(p.compatNote || '')}</small>
+          <small class="sh-muted">${mundane(s) ? 'Совместимость' : 'Совместимость видов'} ${clamp(+p.compat || 0, 0, 100)}%. ${esc(p.compatNote || '')}</small>
           <div class="sh-row"><button class="sh-btn ghost" data-act="dSkip" data-id="${p.id}"><i class="fa-solid fa-xmark"></i> Пропустить</button><button class="sh-btn" data-act="dLike" data-id="${p.id}"><i class="fa-solid fa-heart"></i> Нравится</button></div>
           <button class="sh-link" data-act="dReport" data-id="${p.id}"><i class="fa-solid fa-flag"></i> Пожаловаться и скрыть</button>
         </article>`).join('') : empty('Задайте фильтры и нажмите «Подобрать анкеты».')}`;
@@ -1570,7 +1663,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     function studyTab(s) {
         const top = `<div class="sh-idcard">
           ${ava(s.profile.name, true, s.profile.species)}
-          <div><b>${esc(s.profile.name)}</b><small>${esc(s.profile.faculty)}, ${s.profile.year} курс</small>${badge(s.profile.species || 'вид не указан')}</div>
+          <div><b>${esc(s.profile.name)}</b><small>${esc(s.profile.faculty)}, ${s.profile.year} курс</small>${mundane(s) ? '' : badge(s.profile.species || 'вид не указан')}</div>
           <div class="sh-seal ${rating(s) < 40 ? 'bad' : rating(s) < 70 ? 'warn' : ''}" title="Академический рейтинг"><b>${rating(s)}%</b><small>рейтинг</small></div>
         </div>
         ${s.pausedAt ? '<div class="sh-note warn"><i class="fa-solid fa-pause"></i> Время учёбы на паузе. Пары и дедлайны не идут.</div>' : ''}
@@ -1790,10 +1883,12 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     function campusView(s) {
         const now = Date.now();
         return `${head('Кампус')}
-        <div class="sh-card"><h4>Мероприятия</h4>${s.events.length ? s.events.map((e) => `<div class="sh-li static"><div><b>${esc(e.title)}</b><small>${esc(e.when)}, ${esc(e.place)}. ${esc(e.desc)}</small></div><div class="sh-col"><button class="sh-btn sm ${e.going ? '' : 'ghost'}" data-act="rsvp" data-id="${e.id}">${e.going ? 'Иду' : 'Пойду'}</button>${e.going ? `<button class="sh-btn sm" data-act="goEvent" data-id="${e.id}">Отправиться</button>` : ''}</div></div>`).join('') : '<p class="sh-muted">Список пуст.</p>'}
-          <button class="sh-btn ghost sm" data-act="genEvents"><i class="fa-solid fa-rotate"></i> Найти мероприятия</button></div>
-        <div class="sh-card"><h4>Клубы</h4>${CLUBS.map((c) => `<div class="sh-li static"><div><b>${esc(c)}</b></div><div class="sh-col"><button class="sh-btn sm ${s.clubs.includes(c) ? '' : 'ghost'}" data-act="club" data-c="${esc(c)}">${s.clubs.includes(c) ? 'Участник' : 'Вступить'}</button>${s.clubs.includes(c) ? `<button class="sh-btn sm" data-act="goClub" data-c="${esc(c)}">На занятие</button>` : ''}</div></div>`).join('')}</div>
-        <div class="sh-card sh-form"><h4>Бронирование помещений</h4><label>Помещение<select id="sh-b-room">${ROOMS.map((r) => `<option>${esc(r)}</option>`).join('')}</select></label><label>Когда<input id="sh-b-when" type="datetime-local"></label><button class="sh-btn sm" data-act="book">Забронировать</button>
+        <div class="sh-card"><h4>Мероприятия</h4>${s.events.length ? s.events.map((e) => `<div class="sh-li static"><div><b>${esc(e.title)}</b>${e.lore ? badge('из лора') : ''}<small>${esc(e.when)}, ${esc(e.place)}. ${esc(e.desc)}</small></div><div class="sh-col"><button class="sh-btn sm ${e.going ? '' : 'ghost'}" data-act="rsvp" data-id="${e.id}">${e.going ? 'Иду' : 'Пойду'}</button>${e.going ? `<button class="sh-btn sm" data-act="goEvent" data-id="${e.id}">Отправиться</button>` : ''}</div></div>`).join('') : '<p class="sh-muted">Список пуст.</p>'}
+          <div class="sh-row"><button class="sh-btn ghost sm" data-act="genEvents"><i class="fa-solid fa-rotate"></i> Найти мероприятия</button><button class="sh-btn ghost sm" data-act="campusLore"><i class="fa-solid fa-book"></i> Из лора</button></div></div>
+        <div class="sh-card"><h4>Клубы</h4>${clubsOf(s).map((c) => [c, (s.loreClubs || []).includes(c)]).map(([c, fromLore]) => `<div class="sh-li static"><div><b>${esc(c)}</b>${fromLore ? badge('из лора') : ''}${clubDesc(s, c) ? `<small>${esc(clubDesc(s, c))}</small>` : ''}</div><div class="sh-col"><button class="sh-btn sm ${s.clubs.includes(c) ? '' : 'ghost'}" data-act="club" data-c="${esc(c)}">${s.clubs.includes(c) ? 'Участник' : 'Вступить'}</button>${s.clubs.includes(c) ? `<button class="sh-btn sm" data-act="goClub" data-c="${esc(c)}">На занятие</button>` : ''}</div></div>`).join('')}
+          <div class="sh-row"><button class="sh-btn ghost sm" data-act="findClubs"><i class="fa-solid fa-rotate"></i> Найти клубы</button><button class="sh-btn ghost sm" data-act="campusLore"><i class="fa-solid fa-book"></i> Из лора</button></div>
+          <small>Клубы из лора и те, где вы участник, при обновлении не пропадают.</small></div>
+        <div class="sh-card sh-form"><h4>Бронирование помещений</h4><label>Помещение<select id="sh-b-room">${(mundane(s) ? MUNDANE_ROOMS : ROOMS).map((r) => `<option>${esc(r)}</option>`).join('')}</select></label><label>Когда<input id="sh-b-when" type="datetime-local"></label><button class="sh-btn sm" data-act="book">Забронировать</button>
           ${s.bookings.filter((b) => b.at > now - DAY).map((b) => `<small class="sh-muted"><i class="fa-solid fa-check"></i> ${esc(b.room)}, ${fmtD(b.at)}</small>`).join('')}</div>
         <div class="sh-card sh-form"><h4>Заявки и жалобы</h4><label>Тип<select id="sh-t-type"><option>Техническое обслуживание</option><option>Жалоба</option><option>Административный вопрос</option></select></label><textarea id="sh-t-text" rows="3" placeholder="Опишите проблему"></textarea><button class="sh-btn sm" data-act="ticket">Отправить заявку</button>
           ${s.tickets.slice(0, 8).map((t) => `<div class="sh-li static"><div><b>${esc(t.type)}</b><small>${esc(t.text).slice(0, 80)}</small></div>${badge(ticketStatus(t), ticketStatus(t) === 'Решено' ? 'ok' : 'mid')}</div>`).join('')}</div>
@@ -1806,7 +1901,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const p = s.profile, pr = p.privacy;
         const tog = (k, l) => `<label class="sh-toggle"><input type="checkbox" data-change="privacy" data-k="${k}" ${pr[k] ? 'checked' : ''}><span>${l}</span></label>`;
         return `${head('Профиль')}
-        <div class="sh-idcard">${ava(p.name, true, p.species)}<div><b>${esc(p.name)}</b><small>${pr.faculty ? esc(p.faculty) : 'факультет скрыт'}, ${p.year} курс</small>${pr.abilities && p.abilities ? badge(p.abilities === NO_ABIL ? 'без способностей' : p.abilities) : ''}${pr.species ? badge(p.species || 'вид не указан') : badge('вид скрыт')}</div></div>
+        <div class="sh-idcard">${ava(p.name, true, p.species)}<div><b>${esc(p.name)}</b><small>${pr.faculty ? esc(p.faculty) : 'факультет скрыт'}, ${p.year} курс</small>${pr.abilities && p.abilities ? badge(p.abilities === NO_ABIL ? 'без способностей' : p.abilities) : ''}${mundane(s) ? '' : pr.species ? badge(p.species || 'вид не указан') : badge('вид скрыт')}</div></div>
         <button class="sh-me" data-act="go" data-view="me"><span class="sh-star">⭐</span><div><b>Авторитет: ${Math.round(soc(s).authority)}</b><small>Уровень ${levelOf(soc(s))} · ${kfmt(soc(s).followers)} подписчиков · задания дня</small></div><i class="fa-solid fa-chevron-right"></i></button>
         <div class="sh-card sh-form">
           <label>Имя<input id="sh-pf-name" value="${esc(p.name)}"></label>
@@ -1857,7 +1952,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.11.3 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.12.2 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2009,7 +2104,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${p.text}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}${loreStudentsLine(s, 8)}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
         const arr = Array.isArray(r) ? r : (Array.isArray(r?.comments) ? r.comments : []);
         const list = arr.filter((c) => c && c.author && c.text && cleanName(c.author) !== s.profile.name).slice(0, 8).map((c) => ({
-            id: uid(), author: cleanName(c.author), species: String(c.species || '').slice(0, 40), text: cleanMsg(c.text).slice(0, 400),
+            id: uid(), author: cleanName(c.author), species: SP(s, c.species), text: cleanMsg(c.text).slice(0, 400),
             replyTo: cleanName(c.replyTo), likes: Math.max(0, parseInt(c.likes, 10) || 0), liked: false,
         }));
         list.score = r && !Array.isArray(r) ? r.score : null;
@@ -2110,6 +2205,21 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 save(s);
             });
         },
+        pickWorld: (d, el, s) => {
+            if (s.world && byId('sh-a-name')) readAuth(s);
+            const prev = s.world;
+            s.world = d.w || null;
+            if (s.world && s.world !== prev) {
+                s.faculties = []; s.profile.faculty = ''; s.genClubs = []; s.genClubsAt = 0; s.loreClubs = []; s.campusLoreAt = 0;
+                if (s.world === 'mundane') {
+                    s.profile.species = ''; s.profile.abilities = ''; s.profile.abilityVisible = false;
+                    s.menu = MUNDANE_MENU.map((x) => ({ ...x, id: uid() })); s.market = MUNDANE_MARKET.map((x) => ({ ...x, id: uid() }));
+                } else {
+                    s.menu = DEFAULT_MENU.map((x) => ({ ...x, id: uid() })); s.market = DEFAULT_MARKET.map((x) => ({ ...x, id: uid() }));
+                }
+            }
+            save(s); render();
+        },
         loadSpecies: (d, el, s) => {
             if (d.pre === 'sh-a') readAuth(s);
             return withBusy('Ищу виды в лоре…', async () => {
@@ -2130,13 +2240,15 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             const fac = val('sh-a-fac') || s.profile.faculty;
             if (!s.profile.name) return toast('warning', 'Укажите имя студента.');
             if (!s.profile.gender) return toast('warning', 'Выберите пол.');
-            if (!s.profile.species) return toast('warning', 'Выберите вид.');
-            if (!s.profile.abilities) return toast('warning', 'Выберите способность или «Отсутствуют».');
+            if (!mundane(s) && !s.profile.species) return toast('warning', 'Выберите вид.');
+            if (!mundane(s) && !s.profile.abilities) return toast('warning', 'Выберите способность или «Отсутствуют».');
             if (!fac) return toast('warning', 'Выберите факультет или впишите свой.');
             s.profile.faculty = fac;
             return withBusy('Составляю расписание…', async () => {
                 s.schedule = await genSchedule(s, fac);
                 enqueue(s, async () => { const n = await extractLorePeople(s); if (n) notify(s, `👥 В UniHub появились студенты из вашего мира: ${n}`, 'important'); });
+                enqueue(s, async () => { await extractCampusLore(s); });
+                enqueue(s, async () => { await genClubs(s); });
                 s.auth = true; s.enforceFrom = NOW(); s.quarter = { n: 1, start: NOW() };
                 s.expelled = false; s.expelReason = '';
                 const c = ctx();
@@ -2416,7 +2528,7 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
                 x.updated = now;
             }
             if (s.stories.length > 12) s.stories = s.stories.slice(-12);
-            const posts = arr.filter((p) => p && p.author && p.text).map((p, i) => ({ id: uid(), author: cleanName(p.author), species: String(p.species || '').slice(0, 40), channel: CHANNELS[p.channel] && p.channel !== 'all' ? p.channel : 'general', text: cleanMsg(p.text).slice(0, 600), media: String(p.media || '').slice(0, 200), kind: p.kind, likes: Math.max(0, parseInt(p.likes, 10) || 0), verified: p.verified !== false, t: now - i * 7 * MIN, comments: [], story: cleanName(p.story).slice(0, 60) }));
+            const posts = arr.filter((p) => p && p.author && p.text).map((p, i) => ({ id: uid(), author: cleanName(p.author), species: SP(s, p.species), channel: CHANNELS[p.channel] && p.channel !== 'all' ? p.channel : 'general', text: cleanMsg(p.text).slice(0, 600), media: String(p.media || '').slice(0, 200), kind: p.kind, likes: Math.max(0, parseInt(p.likes, 10) || 0), verified: p.verified !== false, t: now - i * 7 * MIN, comments: [], story: cleanName(p.story).slice(0, 60) }));
             s.feed = [...posts, ...s.feed].slice(0, 80);
             save(s);
         }),
@@ -2442,9 +2554,9 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
             dt.fSpecies = val('sh-d-species'); dt.fAbility = val('sh-d-abil'); dt.fGender = val('sh-d-gender');
             dt.profiles = [];
             return withBusy('Подбираю анкеты…', async () => {
-                const r = await aiJSON(`${world(s)}\n\n${loreStudentsLine(s)}\nЕсли среди студентов из лора есть подходящие под фильтры — включи 1–2 из них с их настоящими данными, остальных придумай.\nСгенерируй 5 анкет студентов этого университета для ${dt.mode === 'friends' ? 'поиска друзей' : 'романтических знакомств'} в UniHub. Вид пользователя: ${s.profile.species || 'не указан'}. Фильтры: пол — ${{ m: 'только парни', f: 'только девушки', nb: 'только небинарные' }[dt.fGender] || 'любой'}; вид — ${dt.fSpecies || 'любой'}; способности — ${dt.fAbility === NO_ABIL ? 'без сверхъестественных способностей' : dt.fAbility || 'любые'}. Оцени межвидовую совместимость с пользователем (compat 0–100) и коротко объясни.\nФормат: [{"name":"Имя","age":20,"species":"","faculty":"","abilities":"","bio":"до 200 символов","compat":75,"compatNote":"одно предложение","verified":true,"gender":"m, f или nb"}]`);
+                const r = await aiJSON(`${world(s)}\n\n${loreStudentsLine(s)}\nЕсли среди студентов из лора есть подходящие под фильтры — включи 1–2 из них с их настоящими данными, остальных придумай.\n${s.faculties.length ? `Поле faculty — один из факультетов этого университета: ${s.faculties.map((f) => f.name).join(', ')}${s.profile.faculty && !s.faculties.some((f) => f.name === s.profile.faculty) ? `, ${s.profile.faculty}` : ''}. Факультеты у анкет разные.\n` : ''}Сгенерируй 5 анкет студентов этого университета для ${dt.mode === 'friends' ? 'поиска друзей' : 'романтических знакомств'} в UniHub. Вид пользователя: ${s.profile.species || 'не указан'}. Фильтры: пол — ${{ m: 'только парни', f: 'только девушки', nb: 'только небинарные' }[dt.fGender] || 'любой'}; вид — ${dt.fSpecies || 'любой'}; способности — ${dt.fAbility === NO_ABIL ? 'без сверхъестественных способностей' : dt.fAbility || 'любые'}. ${mundane(s) ? 'Оцени совместимость характеров и интересов с пользователем (compat 0–100) и коротко объясни. Все анкеты — обычные люди, species оставь пустым, abilities — хобби и таланты.' : 'Оцени межвидовую совместимость с пользователем (compat 0–100) и коротко объясни.'}\nФормат: [{"name":"Имя","age":20,"species":"","faculty":"","abilities":"","bio":"до 200 символов","compat":75,"compatNote":"одно предложение","verified":true,"gender":"m, f или nb"}]`);
                 if (!Array.isArray(r) || !r.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
-                dt.profiles = r.filter((p) => p && p.name).map((p) => ({ id: uid(), name: String(p.name).slice(0, 40), age: parseInt(p.age, 10) || 19, species: String(p.species || '').slice(0, 40), faculty: String(p.faculty || '').slice(0, 60), abilities: String(p.abilities || '').slice(0, 120), bio: String(p.bio || '').slice(0, 300), compat: clamp(parseInt(p.compat, 10) || 50, 0, 100), compatNote: String(p.compatNote || '').slice(0, 160), verified: p.verified !== false }));
+                dt.profiles = r.filter((p) => p && p.name).map((p) => ({ id: uid(), name: String(p.name).slice(0, 40), age: parseInt(p.age, 10) || 19, species: SP(s, p.species), faculty: String(p.faculty || '').slice(0, 60), abilities: String(p.abilities || '').slice(0, 120), bio: String(p.bio || '').slice(0, 300), compat: clamp(parseInt(p.compat, 10) || 50, 0, 100), compatNote: String(p.compatNote || '').slice(0, 160), verified: p.verified !== false }));
                 save(s);
             });
         },
@@ -2601,7 +2713,7 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
             save(s); render();
         },
         genMenu: (d, el, s) => withBusy('Обновляю меню…', async () => {
-            const r = await aiJSON(`${world(s)}\n\nСоставь 10 позиций меню доставки по кампусу для разных видов (кровь, сырое мясо, веган, нектар, эктоплазма, эмоции, огнеупорная еда, обычная еда и т.п.). Кафе и точки должны звучать как места этого университета.\nФормат: [{"title":"","place":"","price":150,"tags":["веган"]}] — теги короткие, строчными буквами.`);
+            const r = await aiJSON(`${world(s)}\n\n${mundane(s) ? 'Составь 10 позиций меню доставки по кампусу обычного университета: кофе, выпечка, ланчи, пицца, суши, веганское, халяль, без глютена и т.п. Реалистичные кафе и столовые, цены в ₡ от 60 до 400.' : 'Составь 10 позиций меню доставки по кампусу для разных видов (кровь, сырое мясо, веган, нектар, эктоплазма, эмоции, огнеупорная еда, обычная еда и т.п.). Кафе и точки должны звучать как места этого университета.'}\nФормат: [{"title":"","place":"","price":150,"tags":["веган"]}] — теги короткие, строчными буквами.`);
             const list = Array.isArray(r) ? r.filter((m) => m && m.title && +m.price > 0) : [];
             if (!list.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
             s.menu = list.map((m) => ({ id: uid(), title: String(m.title).slice(0, 80), place: String(m.place || '').slice(0, 60), price: Math.round(+m.price), tags: (Array.isArray(m.tags) ? m.tags : []).map((t) => String(t).toLowerCase().slice(0, 20)).slice(0, 4) }));
@@ -2637,7 +2749,7 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
             save(s); render();
         },
         genMarket: (d, el, s) => withBusy('Загружаю объявления…', async () => {
-            const r = await aiJSON(`${world(s)}\n\nСгенерируй 8 объявлений маркетплейса студентов: учебники, мебель, электроника и специализированное оборудование для разных видов.\nФормат: [{"title":"","cat":"Учебники|Мебель|Электроника|Оборудование","price":500,"rent":0,"seller":"имя","rating":4.5,"verified":true}] — rent: цена аренды в неделю или 0.`);
+            const r = await aiJSON(`${world(s)}\n\n${mundane(s) ? 'Сгенерируй 8 объявлений студенческого маркетплейса обычного университета: учебники, конспекты, мебель для общежития, электроника, спортивный инвентарь и т.п. Никакой магии, реалистичные цены в ₡' : 'Сгенерируй 8 объявлений маркетплейса студентов: учебники, мебель, электроника и специализированное оборудование для разных видов'}.\nФормат: [{"title":"","cat":"Учебники|Мебель|Электроника|Оборудование","price":500,"rent":0,"seller":"имя","rating":4.5,"verified":true}] — rent: цена аренды в неделю или 0.`);
             const list = Array.isArray(r) ? r.filter((m) => m && m.title && +m.price > 0) : [];
             if (!list.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
             s.market = list.map((m) => ({ id: uid(), title: String(m.title).slice(0, 80), cat: MARKET_CATS.includes(m.cat) ? m.cat : 'Оборудование', price: Math.round(+m.price), rent: Math.max(0, Math.round(+m.rent || 0)), seller: String(m.seller || 'Студент').slice(0, 40), rating: clamp(+m.rating || 4, 1, 5), verified: m.verified !== false }));
@@ -2655,11 +2767,20 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
             save(s); render();
         },
 
+        findClubs: (d, el, s) => withBusy('Ищу клубы…', async () => {
+            const n = await genClubs(s);
+            toast(n ? 'success' : 'error', n ? `Найдено клубов: ${n}` : 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
+        }),
+        campusLore: (d, el, s) => withBusy('Читаю лор кампуса…', async () => {
+            const n = await extractCampusLore(s);
+            toast(n ? 'success' : 'info', n ? `Из лора добавлено клубов и мероприятий: ${n}` : 'В лоре не нашлось клубов и мероприятий.');
+        }),
         genEvents: (d, el, s) => withBusy('Ищу мероприятия…', async () => {
-            const r = await aiJSON(`${world(s)}\n\nПридумай 4 ближайших мероприятия кампуса (вечеринки, лекции, турниры, ритуалы, ярмарки).\nФормат: [{"title":"","when":"например: пятница, 19:00","place":"","desc":"одно предложение"}]`);
+            const loreEv = await loreText(/мероприят|праздник|бал|фестивал|турнир|концерт|вечеринк|традици|ярмарк|event|festival|party|tradition/i);
+            const r = await aiJSON(`${world(s)}\n${loreEv ? `\nЛор о событиях и традициях кампуса:\n${loreEv.slice(0, 2500)}\nЕсли там описаны мероприятия или традиции — используй их в первую очередь.\n` : ''}\nПридумай 4 ближайших мероприятия кампуса (${mundane(s) ? 'вечеринки, лекции, спортивные турниры, концерты, ярмарки, конференции' : 'вечеринки, лекции, турниры, ритуалы, ярмарки'}).\nФормат: [{"title":"","when":"например: пятница, 19:00","place":"","desc":"одно предложение"}]`);
             const list = Array.isArray(r) ? r.filter((e) => e && e.title) : [];
             if (!list.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
-            s.events = list.map((e) => ({ id: uid(), title: String(e.title).slice(0, 80), when: String(e.when || '').slice(0, 50), place: String(e.place || '').slice(0, 60), desc: String(e.desc || '').slice(0, 200), going: false }));
+            s.events = [...s.events.filter((e) => e.lore), ...list.map((e) => ({ id: uid(), title: String(e.title).slice(0, 80), when: String(e.when || '').slice(0, 50), place: String(e.place || '').slice(0, 60), desc: String(e.desc || '').slice(0, 200), going: false }))].slice(0, 12);
             save(s);
         }),
         rsvp: (d, el, s) => { const e = s.events.find((x) => x.id === d.id); if (e) { e.going = !e.going; save(s); render(); } },
@@ -2855,6 +2976,8 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
     function onChatChanged() {
         ui.view = null; ui.param = null; lastKey = '';
         const s0 = S();
+        if (s0 && s0.auth && !s0.campusLoreAt) enqueue(s0, async () => { await extractCampusLore(s0); });
+        if (s0 && s0.auth && !s0.genClubsAt) enqueue(s0, async () => { await genClubs(s0); });
         if (s0 && s0.auth && !s0.lorePeopleAt) enqueue(s0, async () => { const n = await extractLorePeople(s0); if (n) notify(s0, `👥 В UniHub появились студенты из вашего мира: ${n}`, 'important'); });
         tick();
         updateInjection();

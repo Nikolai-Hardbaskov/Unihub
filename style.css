@@ -420,3 +420,21 @@
 #unihub-phone .sh-toggle input[type='checkbox']:checked::before { background: var(--sh-on) !important; transform: translateX(18px) !important; }
 #unihub-phone .sh-toggle input[type='checkbox']:focus-visible { outline: 2px solid var(--sh-amber); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { #unihub-phone .sh-toggle input, #unihub-phone .sh-toggle input::before { transition: none !important; } }
+
+/* выбор университета */
+#unihub-phone .sh-world { width: 100%; display: flex; gap: 14px; align-items: center; text-align: left; padding: 16px; margin-bottom: 12px; border-radius: 16px; border: 1px solid var(--sh-line); background: var(--sh-card); color: var(--sh-text); }
+#unihub-phone .sh-world > i { font-size: 26px; color: var(--sh-amber); width: 32px; text-align: center; }
+#unihub-phone .sh-world b { display: block; font-size: 15px; margin-bottom: 2px; }
+#unihub-phone .sh-world:hover { border-color: var(--sh-amber); }
+#unihub-phone .sh-note .sh-link { margin-left: auto; padding: 0; }
+
+/* выпадающие списки: тема SillyTavern не перекрашивает */
+#unihub-phone select {
+    -webkit-appearance: none !important; appearance: none !important; mix-blend-mode: normal !important;
+    background-color: var(--sh-ink) !important; color: var(--sh-text) !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23a29db5' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important; background-position: right 12px center !important; background-size: 12px 8px !important;
+    padding-right: 34px !important; border: 1px solid var(--sh-line) !important; border-radius: 10px !important; box-shadow: none !important;
+}
+
+#unihub-phone .sh-badge.fac { background: color-mix(in srgb, var(--sh-amber) 14%, transparent); color: var(--sh-amber); }
