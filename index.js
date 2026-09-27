@@ -2014,10 +2014,14 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const seg = `<div class="sh-seg"><button class="${mt === 'buy' ? 'on' : ''}" data-act="mTab" data-t="buy">Купить</button><button class="${mt === 'sell' ? 'on' : ''}" data-act="mTab" data-t="sell">Продать</button><button class="${mt === 'mine' ? 'on' : ''}" data-act="mTab" data-t="mine">Мои вещи</button></div>`;
         let body = '';
         if (mt === 'buy') {
-            const items = s.market.filter((m) => ui.mcat === 'all' || m.cat === ui.mcat);
-            body = `<div class="sh-chips"><button class="sh-chip ${ui.mcat === 'all' ? 'on' : ''}" data-act="mcat" data-c="all">Всё</button>${MARKET_CATS.map((c) => `<button class="sh-chip ${ui.mcat === c ? 'on' : ''}" data-act="mcat" data-c="${c}">${c}</button>`).join('')}</div>
-            ${items.map((m) => `<div class="sh-card sh-item"><b>${esc(m.title)}</b><small>${esc(m.cat)}. Продавец: ${esc(m.seller)} ★ ${(+m.rating || 0).toFixed(1)} ${m.verified ? '<i class="fa-solid fa-circle-check sh-verified" title="Верифицирован"></i>' : ''}</small>
-              <div class="sh-row"><button class="sh-btn sm" data-act="buy" data-id="${m.id}">Купить за ${money(m.price)}</button>${m.rent ? `<button class="sh-btn sm ghost" data-act="rent" data-id="${m.id}">Аренда ${money(m.rent)}/нед</button>` : ''}</div></div>`).join('') || empty('В этой категории ничего нет.')}
+            const q = (ui.mq || '').toLowerCase().trim();
+            const qw = q.split(/[\s,]+/).filter((w) => w.length >= 3).map((w) => w.slice(0, 5));
+            const items = s.market.filter((m) => (ui.mcat === 'all' || m.cat === ui.mcat) && (!q || qw.some((w) => m.title.toLowerCase().includes(w))));
+            body = `<div class="sh-card sh-form"><h4>Что ищете?</h4><div class="sh-row sh-search"><input id="sh-mk-q" placeholder="Например: игровой ноутбук, словарь японского" value="${esc(ui.mq || '')}"><button class="sh-btn sm" data-act="marketSearch"><i class="fa-solid fa-magnifying-glass"></i></button></div>
+              ${q ? `<small>Поиск: «${esc(ui.mq)}» — найдено ${items.length}. <button class="sh-link" data-act="marketFind">Спросить у студентов</button> · <button class="sh-link" data-act="marketClear">сбросить</button></small>` : '<small>Если на маркете этого нет — UniHub найдёт студентов, которые продают или сдают это.</small>'}</div>
+            <div class="sh-chips"><button class="sh-chip ${ui.mcat === 'all' ? 'on' : ''}" data-act="mcat" data-c="all">Всё</button>${MARKET_CATS.map((c) => `<button class="sh-chip ${ui.mcat === c ? 'on' : ''}" data-act="mcat" data-c="${c}">${c}</button>`).join('')}</div>
+            ${items.map((m) => `<div class="sh-card sh-item"><b>${esc(m.title)}</b>${m.found ? badge('🔎 по запросу') : ''}<small>${esc(m.cat)}. Продавец: ${esc(m.seller)} ★ ${(+m.rating || 0).toFixed(1)} ${m.verified ? '<i class="fa-solid fa-circle-check sh-verified" title="Верифицирован"></i>' : ''}</small>
+              <div class="sh-row"><button class="sh-btn sm" data-act="buy" data-id="${m.id}">Купить за ${money(m.price)}</button>${m.rent ? `<button class="sh-btn sm ghost" data-act="rent" data-id="${m.id}">Аренда ${money(m.rent)}/нед</button>` : ''}</div></div>`).join('') || empty(q ? 'Здесь такого нет. Нажмите «Спросить у студентов».' : 'В этой категории ничего нет.')}
             <button class="sh-btn ghost wide" data-act="genMarket"><i class="fa-solid fa-rotate"></i> Новые объявления</button>`;
         } else if (mt === 'sell') {
             body = `<div class="sh-card sh-form"><label>Что продаёте<input id="sh-s-title"></label><label>Категория<select id="sh-s-cat">${MARKET_CATS.map((c) => `<option>${c}</option>`).join('')}</select></label><label>Цена, ₡<input id="sh-s-price" type="number" min="1"></label><button class="sh-btn" data-act="sell">Разместить объявление</button><small class="sh-muted">Комиссия площадки — 5%. Деньги придут, когда найдётся покупатель.</small></div>
@@ -2113,7 +2117,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.15.1 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.15.2 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2974,6 +2978,31 @@ ${story ? `Последние события истории:\n${story}\nЕсли
             save(s);
         }),
         mTab: (d) => { ui.marketTab = d.t; render(); },
+        marketClear: () => { ui.mq = ''; const e = byId('sh-mk-q'); if (e) e.value = ''; render(); },
+        marketSearch: (d, el, s) => {
+            ui.mq = val('sh-mk-q'); ui.mcat = 'all';
+            if (!ui.mq) return render();
+            const qw = ui.mq.toLowerCase().split(/[\s,]+/).filter((w) => w.length >= 3).map((w) => w.slice(0, 5));
+            const has = s.market.some((m) => qw.some((w) => m.title.toLowerCase().includes(w)));
+            render();
+            if (!has) return ACT.marketFind(d, el, s);
+        },
+        marketFind: (d, el, s) => {
+            const q = ui.mq || val('sh-mk-q');
+            if (!q) return toast('warning', 'Напишите, что ищете.');
+            return withBusy('Ищу у студентов…', async () => {
+                const r = await aiJSON(`${world(s)}\n\nСтудент ищет на маркетплейсе кампуса: «${q}». Сгенерируй 3–5 объявлений от разных студентов (или магазинчиков кампуса), которые продают или сдают именно это или близкие варианты — разное состояние, разные цены (новое дороже, б/у дешевле).${mundane(s) ? ' Только реальные вещи обычного мира, без магии.' : ' Вещи в духе этого сверхъестественного мира допустимы.'} Если такое в этом мире купить невозможно — верни пустой массив.
+Категория — одна из: ${MARKET_CATS.join(', ')}. Цены в ₡, для ориентира: учебник 300–600, мебель 400–2000, ноутбук 5000–15000.
+Формат: [{"title":"","cat":"","price":500,"rent":0,"seller":"имя, курс","rating":4.5,"verified":true}] — rent: цена аренды в неделю или 0.`);
+                const list = (Array.isArray(r) ? r : []).filter((m) => m && m.title && +m.price > 0);
+                if (!list.length) return toast('info', `Никто на кампусе не продаёт «${q}». Попробуйте сформулировать иначе.`);
+                const add = list.map((m) => ({ id: uid(), title: cleanMsg(m.title).slice(0, 80), cat: MARKET_CATS.includes(m.cat) ? m.cat : 'Оборудование', price: Math.round(+m.price), rent: Math.max(0, Math.round(+m.rent || 0)), seller: cleanMsg(m.seller || 'Студент').slice(0, 40), rating: clamp(+m.rating || 4, 1, 5), verified: m.verified !== false, found: true }));
+                s.market = [...add, ...s.market].slice(0, 60);
+                ui.mq = q; ui.mcat = 'all';
+                toast('success', `Найдено предложений: ${add.length}`);
+                save(s);
+            });
+        },
         mcat: (d) => { ui.mcat = d.c; render(); },
         buy: (d, el, s) => {
             const m = s.market.find((x) => x.id === d.id);
@@ -3001,10 +3030,10 @@ ${story ? `Последние события истории:\n${story}\nЕсли
             save(s); render();
         },
         genMarket: (d, el, s) => withBusy('Загружаю объявления…', async () => {
-            const r = await aiJSON(`${world(s)}\n\n${mundane(s) ? 'Сгенерируй 8 объявлений студенческого маркетплейса обычного университета: учебники, конспекты, мебель для общежития, электроника, спортивный инвентарь и т.п. Никакой магии, реалистичные цены в ₡' : 'Сгенерируй 8 объявлений маркетплейса студентов: учебники, мебель, электроника и специализированное оборудование для разных видов'}.\nФормат: [{"title":"","cat":"Учебники|Мебель|Электроника|Оборудование","price":500,"rent":0,"seller":"имя","rating":4.5,"verified":true}] — rent: цена аренды в неделю или 0.`);
+            const r = await aiJSON(`${world(s)}\n\n${mundane(s) ? 'Сгенерируй 16 объявлений студенческого маркетплейса обычного университета: учебники, конспекты, мебель для общежития, электроника, спортивный инвентарь и т.п. Никакой магии, реалистичные цены в ₡' : 'Сгенерируй 16 объявлений маркетплейса студентов: учебники, мебель, электроника и специализированное оборудование для разных видов'}.\nФормат: [{"title":"","cat":"Учебники|Мебель|Электроника|Оборудование","price":500,"rent":0,"seller":"имя","rating":4.5,"verified":true}] — rent: цена аренды в неделю или 0.`);
             const list = Array.isArray(r) ? r.filter((m) => m && m.title && +m.price > 0) : [];
             if (!list.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
-            s.market = list.map((m) => ({ id: uid(), title: String(m.title).slice(0, 80), cat: MARKET_CATS.includes(m.cat) ? m.cat : 'Оборудование', price: Math.round(+m.price), rent: Math.max(0, Math.round(+m.rent || 0)), seller: String(m.seller || 'Студент').slice(0, 40), rating: clamp(+m.rating || 4, 1, 5), verified: m.verified !== false }));
+            s.market = [...s.market.filter((m) => m.found), ...list.map((m) => ({ id: uid(), title: String(m.title).slice(0, 80), cat: MARKET_CATS.includes(m.cat) ? m.cat : 'Оборудование', price: Math.round(+m.price), rent: Math.max(0, Math.round(+m.rent || 0)), seller: String(m.seller || 'Студент').slice(0, 40), rating: clamp(+m.rating || 4, 1, 5), verified: m.verified !== false }))].slice(0, 60);
             save(s);
         }),
 
@@ -3129,6 +3158,7 @@ ${story ? `Последние события истории:\n${story}\nЕсли
     }
     function onKey(e) {
         e.stopPropagation();
+        if (e.key === 'Enter' && e.target.id === 'sh-mk-q') { e.preventDefault(); document.querySelector('#unihub-phone [data-act="marketSearch"]')?.click(); return; }
         if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'sh-cmt') {
             e.preventDefault();
             document.querySelector('#unihub-phone [data-act="comment"]')?.click();

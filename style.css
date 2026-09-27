@@ -449,3 +449,8 @@
 #unihub-phone .sh-oline.total b { color: var(--sh-amber); }
 
 #unihub-phone .sh-find { margin: 6px 0 2px; }
+
+/* описания в списках (мероприятия, клубы, меню и т.п.) — полностью, без обрезки */
+#unihub-phone .sh-li.static small { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
+#unihub-phone .sh-search { flex-wrap: nowrap !important; margin-top: 0; }
+#unihub-phone .sh-search input { flex: 1; min-width: 0; margin: 0; }
