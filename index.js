@@ -238,6 +238,22 @@
         { name: 'Архитектурный факультет', desc: 'Архитектура и градостроительство.', source: 'invented' },
         { name: 'Факультет социологии', desc: 'Общество, исследования, медиа.', source: 'invented' },
     ];
+    const G = (title, price, tag, place = 'Минимаркет кампуса') => ({ title, place, price, tags: [tag] });
+    const BASE_GROCERIES = [
+        G('Молоко 1 л', 45, 'молочное'), G('Яйца, 10 шт', 70, 'молочное'), G('Сливочное масло', 90, 'молочное'), G('Сыр моцарелла', 110, 'молочное'), G('Пармезан', 160, 'молочное'), G('Сметана', 50, 'молочное'),
+        G('Говяжий фарш 500 г', 190, 'мясо и рыба'), G('Куриное филе 500 г', 160, 'мясо и рыба'), G('Бекон', 130, 'мясо и рыба'), G('Филе лосося', 280, 'мясо и рыба'),
+        G('Листы для лазаньи', 80, 'бакалея'), G('Спагетти', 60, 'бакалея'), G('Рис', 55, 'бакалея'), G('Мука', 40, 'бакалея'), G('Сахар', 45, 'бакалея'), G('Оливковое масло', 150, 'бакалея'), G('Томаты в собственном соку', 70, 'бакалея'),
+        G('Помидоры', 60, 'овощи и зелень'), G('Лук', 25, 'овощи и зелень'), G('Чеснок', 20, 'овощи и зелень'), G('Морковь', 25, 'овощи и зелень'), G('Картофель 1 кг', 40, 'овощи и зелень'), G('Базилик', 35, 'овощи и зелень'),
+        G('Яблоки', 50, 'фрукты'), G('Бананы', 45, 'фрукты'), G('Лимоны', 40, 'фрукты'),
+        G('Хлеб', 35, 'хлеб и сладкое'), G('Шоколад', 70, 'хлеб и сладкое'), G('Печенье', 55, 'хлеб и сладкое'),
+        G('Соль и перец', 30, 'специи и напитки'), G('Молотый кофе', 180, 'специи и напитки'), G('Чай', 90, 'специи и напитки'),
+    ];
+    const MAGIC_GROCERIES = [
+        G('Донорская кровь, пакет', 150, 'для видов', 'Лавка «Ночная смена»'), G('Сырая оленина', 220, 'для видов', 'Лавка «Полнолуние»'), G('Мёд диких пчёл', 110, 'для видов', 'Кафе «Фея»'),
+        G('Нектар в банке', 90, 'для видов', 'Кафе «Фея»'), G('Эктоплазменный концентрат', 130, 'для видов', 'Спектр-бар'), G('Огнеупорные специи', 80, 'для видов', 'Кухня «Преисподняя»'),
+        G('Свежие водоросли', 70, 'для видов', 'Русалочья лавка'), G('Лунная соль', 60, 'для видов', 'Алхимическая лавка'),
+    ];
+    const defaultGroceries = (s) => [...BASE_GROCERIES, ...(s?.world === 'mundane' ? [] : MAGIC_GROCERIES)].map((x) => ({ ...x, id: uid() }));
     const mundane = (s) => s?.world === 'mundane';
     const SP = (s, v) => (mundane(s) ? '' : String(v || '').slice(0, 40));
     const CHANNELS = { all: 'Все', general: 'Общее', study: 'Учёба', clubs: 'Клубы', dorms: 'Общежития', species: 'Мой вид' };
@@ -316,7 +332,7 @@
         [/^(✅ Вы|📝)/, { tab: 'study', studyTab: 'schedule' }],
         [/^(🎯|🏆|⬆️|⌛ Задание|📊|🔥|🚫|🌤️)|подписал/i, { view: 'me' }],
         [/^(📅|⏰|😶|❌ Встреча|💔)/, { view: 'meetings' }],
-        [/^(📦|🍽️)/, { view: 'delivery' }],
+        [/^(📦|🍽️|🛒)/, { view: 'delivery' }],
         [/^💰/, { view: 'market' }],
         [/^🎓 Начислена/, { view: 'wallet' }],
         [/^👥 В UniHub появились/, { view: 'settings' }],
@@ -1231,9 +1247,9 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         if (!s || !s.auth || !last || last.is_user || last.is_system) return;
         s.replyCount = (s.replyCount || 0) + 1;
         for (const o of s.orders) {
-            if (o.kind !== 'food' || o.stage === 'delivered' || !o.injected) continue;
+            if ((o.kind !== 'food' && o.kind !== 'grocery') || o.stage === 'delivered' || !o.injected) continue;
             o.stage = 'delivered'; o.notified = true;
-            notify(s, `🍽️ Заказ доставлен: ${o.title}`, 'info', { view: 'delivery' });
+            notify(s, `${o.kind === 'grocery' ? '🛒 Продукты доставлены' : '🍽️ Заказ доставлен'}: ${o.title}`, 'info', { view: 'delivery' });
         }
         save(s);
     }
@@ -1380,10 +1396,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         if (others.length) L.push(`Для рассказчика — отношения ${p.name} с другими студентами по UniHub (учитывай, только если этот человек появится в сцене; ${ctr ? ctr.name : 'другие персонажи'} об этом не знает, если не был свидетелем и ему не рассказали): ${others.map((t) => `${t.name} — ${t.conflict || t.beef ? `в ссоре с ${p.name}${t.conflict ? ` (${t.conflict.why})` : ''}` : relLabel(t)}`).join('; ')}.`);
         const beefs = s.threads.filter((t) => t.beef);
         if (beefs.length) L.push(`Общеизвестно в кампусе: публичный бифф в UniHub между ${p.name} и ${beefs.map((t) => t.name).join(', ')} — студенты это обсуждают, об этом может знать кто угодно.`);
-        const arriving = s.orders.filter((o) => o.kind === 'food' && o.stage !== 'delivered' && (o.dueReply !== undefined ? (s.replyCount || 0) + 1 >= o.dueReply : Date.now() >= o.eta));
+        const arriving = s.orders.filter((o) => (o.kind === 'food' || o.kind === 'grocery') && o.stage !== 'delivered' && (o.dueReply !== undefined ? (s.replyCount || 0) + 1 >= o.dueReply : Date.now() >= o.eta));
         if (arriving.length) {
             for (const o of arriving) o.injected = true;
-            L.push(`ДОСТАВКА — ОБЯЗАТЕЛЬНО В ЭТОМ ОТВЕТЕ: курьер UniHub приносит ${p.name} заказ: ${arriving.map((o) => `${o.title}${o.place ? ` (из: ${o.place})` : ''}`).join('; ')}. Доставка приходит туда, где ${p.name} находится прямо сейчас по сцене (комната, аудитория, двор, кафе и т.д.): курьер${mundane(s) ? '' : ' или доставщик в духе этого мира'} появляется, называет заказ и передаёт его. Впиши это естественно в текущую сцену, не обрывая её.`);
+            L.push(`ДОСТАВКА — ОБЯЗАТЕЛЬНО В ЭТОМ ОТВЕТЕ: курьер UniHub приносит ${p.name} заказ: ${arriving.map((o) => `${o.kind === 'grocery' ? 'пакет с продуктами — ' : ''}${o.title}${o.place ? ` (из: ${o.place})` : ''}`).join('; ')}. Доставка приходит туда, где ${p.name} находится прямо сейчас по сцене (комната, аудитория, двор, кафе и т.д.): курьер${mundane(s) ? '' : ' или доставщик в духе этого мира'} появляется, называет заказ и передаёт его. Впиши это естественно в текущую сцену, не обрывая её.`);
         }
         const so = soc(s), nowT = NOW();
         L.push(`Популярность ${p.name} в UniHub (публично видно): уровень ${levelOf(so)}, ${kfmt(so.followers)} подписчиков.${cancelled(s) ? ` Сейчас ${p.name} «отменяют» в сети — многие студенты настроены враждебно и обсуждают это.` : ''}`);
@@ -1415,7 +1431,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     /* ───────────────────────── UI: состояние экрана ───────────────────────── */
 
-    const ui = { open: false, tab: 'feed', view: null, param: null, studyTab: 'schedule', marketTab: 'buy', channel: 'all', diet: 'all', mcat: 'all', schedDay: null, busy: '' };
+    const ui = { deliveryTab: 'food', gcat: 'all', open: false, tab: 'feed', view: null, param: null, studyTab: 'schedule', marketTab: 'buy', channel: 'all', diet: 'all', mcat: 'all', schedDay: null, busy: '' };
     let lastKey = '';
 
     async function withBusy(label, fn) {
@@ -1909,7 +1925,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
 
     function orderStatus(o, s) {
-        if (o.kind === 'food' && o.dueReply !== undefined) {
+        if ((o.kind === 'food' || o.kind === 'grocery') && o.dueReply !== undefined) {
             if (o.stage === 'delivered') return ['Доставлено', 100];
             const leftN = o.dueReply - (s?.replyCount || 0);
             if (leftN >= 2) return ['Готовится — доставят через одно сообщение истории', 30];
@@ -1922,7 +1938,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         return ['Курьер в пути', Math.round(p * 100)];
     }
     /** Разбор свободного заказа: «2 капучино, круассан, пицца маргарита». */
-    function parseOrder(s, text) {
+    function parseOrder(s, text, list = s.menu) {
         const stem = (w) => w.toLowerCase().replace(/[«»"'().,!]/g, '').slice(0, 5);
         const words = (t) => String(t).toLowerCase().replace(/[«»"'()]/g, ' ').split(/[\s-]+/).filter((w) => w.length >= 3).map(stem);
         const lines = [], missing = [];
@@ -1936,7 +1952,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             qty = clamp(qty, 1, 20);
             const low = part.toLowerCase(), pw = words(part);
             let best = null, bestScore = 0;
-            for (const it of s.menu) {
+            for (const it of list) {
                 const t = it.title.toLowerCase();
                 let score = t.includes(low) || low.includes(t) ? 10 : 0;
                 const tw = words(it.title);
@@ -1950,21 +1966,22 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         }
         return { lines, missing, total: lines.reduce((a, l) => a + l.item.price * l.qty, 0) };
     }
+    const deliveryList = (s) => (ui.deliveryTab === 'grocery' ? (s.groceries ||= defaultGroceries(s)) : s.menu);
     function orderPreview(s, text) {
         if (!String(text).trim()) return '';
-        const { lines, missing, total } = parseOrder(s, text);
+        const { lines, missing, total } = parseOrder(s, text, deliveryList(s));
         return `${lines.map((l) => `<div class="sh-oline"><span>${l.qty > 1 ? `${l.qty} × ` : ''}${esc(l.item.title)}</span><b>${money(l.item.price * l.qty)}</b></div>`).join('')}
-          ${missing.length ? `<small class="sh-bad-t">Нет в меню: ${esc(missing.join(', '))}</small>` : ''}
+          ${missing.length ? `<small class="sh-bad-t">Нет ${ui.deliveryTab === 'grocery' ? 'в магазине' : 'в меню'}: ${esc(missing.join(', '))}</small><button class="sh-btn sm ghost sh-find" data-act="findMissing"><i class="fa-solid fa-magnifying-glass"></i> Найти под заказ</button>` : ''}
           ${lines.length ? `<div class="sh-oline total"><span>Итого</span><b>${money(total)}</b></div>` : ''}`;
     }
     /** Оформляет заказ еды: доставка в историю через 1–2 ответа (в режиме времени истории). */
-    function placeFoodOrder(s, lines) {
+    function placeFoodOrder(s, lines, kind = 'food') {
         const total = lines.reduce((a, l) => a + l.item.price * l.qty, 0);
         const title = lines.map((l) => `${l.qty > 1 ? `${l.qty} × ` : ''}${l.item.title}`).join(', ');
-        if (!pay(s, total, `Доставка: ${title}`)) { render(); return false; }
+        if (!pay(s, total, `${kind === 'grocery' ? 'Продукты' : 'Доставка'}: ${title}`)) { render(); return false; }
         const now = NOW();
         const places = [...new Set(lines.map((l) => l.item.place).filter(Boolean))].join(', ');
-        const o = { id: uid(), kind: 'food', title, place: places, price: total, t: now, eta: now + (15 + Math.floor(Math.random() * 20)) * MIN, stage: 'cooking' };
+        const o = { id: uid(), kind, title, place: places, price: total, t: now, eta: now + (15 + Math.floor(Math.random() * 20)) * MIN, stage: 'cooking' };
         if (gameMode(s)) o.dueReply = (s.replyCount || 0) + (Math.random() < 0.5 ? 1 : 2);
         s.orders.unshift(o);
         questEvent(s, 'order');
@@ -1973,16 +1990,23 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         return true;
     }
     function deliveryView(s) {
-        const tags = [...new Set(s.menu.flatMap((m) => m.tags || []))];
-        const items = s.menu.filter((m) => ui.diet === 'all' || (m.tags || []).includes(ui.diet));
+        const grocery = ui.deliveryTab === 'grocery';
+        const list = deliveryList(s);
+        const cur = grocery ? (ui.gcat || 'all') : ui.diet;
+        const tags = [...new Set(list.flatMap((m) => m.tags || []))];
+        const items = list.filter((m) => cur === 'all' || (m.tags || []).includes(cur));
+        const dishes = grocery ? [...new Set(list.map((g) => g.forDish).filter(Boolean))] : [];
+        const act = grocery ? 'gcat' : 'diet', key = grocery ? 'c' : 'diet';
         return `${head('Доставка по кампусу')}
-        <div class="sh-card sh-form"><h4>Свой заказ</h4><textarea id="sh-o-text" rows="2" placeholder="Через запятую: 2 капучино, круассан, пицца маргарита"></textarea><div id="sh-o-prev" class="sh-opreview"></div><button class="sh-btn sm" data-act="orderText">Заказать</button></div>
-        <div class="sh-chips"><button class="sh-chip ${ui.diet === 'all' ? 'on' : ''}" data-act="diet" data-diet="all">Всё</button>${tags.map((t) => `<button class="sh-chip ${ui.diet === t ? 'on' : ''}" data-act="diet" data-diet="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-        ${items.map((m) => `<div class="sh-li static"><div><b>${esc(m.title)}</b>${m.wishedBy ? badge(`💭 хотел(а) ${m.wishedBy}`, 'fac') : ''}<small>${esc(m.place)}. ${(m.tags || []).map((t) => esc(t)).join(', ')}</small></div><button class="sh-btn sm" data-act="order" data-id="${m.id}">${money(m.price)}</button></div>`).join('')}
-        <button class="sh-btn ghost wide" data-act="genMenu"><i class="fa-solid fa-rotate"></i> Обновить меню</button>
+        <div class="sh-seg"><button class="${grocery ? '' : 'on'}" data-act="dTab" data-t="food"><i class="fa-solid fa-utensils"></i> Готовая еда</button><button class="${grocery ? 'on' : ''}" data-act="dTab" data-t="grocery"><i class="fa-solid fa-basket-shopping"></i> Продукты</button></div>
+        <div class="sh-card sh-form"><h4>Свой заказ</h4><textarea id="sh-o-text" rows="2" placeholder="${grocery ? 'Через запятую: листы для лазаньи, 2 томаты, фарш, моцарелла' : 'Через запятую: 2 капучино, круассан, пицца маргарита'}"></textarea><div id="sh-o-prev" class="sh-opreview"></div><button class="sh-btn sm" data-act="orderText">Заказать</button></div>
+        ${dishes.length ? `<div class="sh-note"><i class="fa-solid fa-eye"></i><span>Продукты для блюд из истории: ${esc(dishes.join(', '))} — отмечены 👀 и стоят вверху.</span></div>` : ''}
+        <div class="sh-chips"><button class="sh-chip ${cur === 'all' ? 'on' : ''}" data-act="${act}" data-${key}="all">Всё</button>${tags.map((t) => `<button class="sh-chip ${cur === t ? 'on' : ''}" data-act="${act}" data-${key}="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+        ${items.map((m) => `<div class="sh-li static"><div><b>${esc(m.title)}</b>${m.wishedBy ? badge(`💭 хотел(а) ${m.wishedBy}`, 'fac') : ''}${m.forDish ? badge(`👀 для приготовления блюда: ${m.forDish}`, 'fac') : ''}${m.special ? badge('🔎 под заказ') : ''}<small>${esc(m.place)}. ${(m.tags || []).map((t) => esc(t)).join(', ')}</small></div><button class="sh-btn sm" data-act="order" data-id="${m.id}" data-kind="${grocery ? 'grocery' : 'food'}">${money(m.price)}</button></div>`).join('')}
+        <button class="sh-btn ghost wide" data-act="${grocery ? 'genGroceries' : 'genMenu'}"><i class="fa-solid fa-rotate"></i> ${grocery ? 'Обновить продукты' : 'Обновить меню'}</button>
         <div class="sh-card sh-form"><h4>Посылка другому студенту</h4><label>Кому<input id="sh-p-to"></label><label>Что внутри<input id="sh-p-what"></label><button class="sh-btn sm" data-act="parcel">Отправить за ${money(60)}</button></div>
         <h4>Отслеживание</h4>
-        ${s.orders.length ? s.orders.slice(0, 15).map((o) => { const [st, p] = orderStatus(o, s); return `<div class="sh-card"><b>${o.kind === 'parcel' ? `📦 Для ${esc(o.to)}: ${esc(o.title)}` : `🍽️ ${esc(o.title)}`}</b><small class="sh-muted">${esc(st)}${o.dueReply === undefined && o.stage !== 'delivered' ? `, прибытие ~${fmtT(o.eta)}` : ''}${o.price ? ` · ${money(o.price)}` : ''}</small><div class="sh-bar"><span style="width:${p}%"></span></div></div>`; }).join('') : empty('Заказов пока нет.')}`;
+        ${s.orders.length ? s.orders.slice(0, 15).map((o) => { const [st, p] = orderStatus(o, s); return `<div class="sh-card"><b>${o.kind === 'parcel' ? `📦 Для ${esc(o.to)}: ${esc(o.title)}` : o.kind === 'grocery' ? `🛒 ${esc(o.title)}` : `🍽️ ${esc(o.title)}`}</b><small class="sh-muted">${esc(st)}${o.dueReply === undefined && o.stage !== 'delivered' ? `, прибытие ~${fmtT(o.eta)}` : ''}${o.price ? ` · ${money(o.price)}` : ''}</small><div class="sh-bar"><span style="width:${p}%"></span></div></div>`; }).join('') : empty('Заказов пока нет.')}`;
     }
 
     function marketView(s) {
@@ -2089,7 +2113,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.14.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.15.1 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2161,6 +2185,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             if (focusId) byId(focusId)?.focus();
         } else scr.scrollTop = 0;
         if (ui.view === 'thread') scr.scrollTop = scr.scrollHeight;
+        const ot = byId('sh-o-text'), op = byId('sh-o-prev');
+        if (ot && op && ot.value) { const s0 = S(); if (s0) op.innerHTML = orderPreview(s0, ot.value); }
         if (ui.view === 'profile' || ui.view === 'settings') setTimeout(() => { try { styleDiag(); } catch { /* нет getComputedStyle */ } }, 300);
         lastKey = key;
     }
@@ -2363,9 +2389,9 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 s.faculties = []; s.profile.faculty = ''; s.genClubs = []; s.genClubsAt = 0; s.loreClubs = []; s.campusLoreAt = 0;
                 if (s.world === 'mundane') {
                     s.profile.species = ''; s.profile.abilities = ''; s.profile.abilityVisible = false;
-                    s.menu = MUNDANE_MENU.map((x) => ({ ...x, id: uid() })); s.market = MUNDANE_MARKET.map((x) => ({ ...x, id: uid() }));
+                    s.menu = MUNDANE_MENU.map((x) => ({ ...x, id: uid() })); s.market = MUNDANE_MARKET.map((x) => ({ ...x, id: uid() })); s.groceries = null;
                 } else {
-                    s.menu = DEFAULT_MENU.map((x) => ({ ...x, id: uid() })); s.market = DEFAULT_MARKET.map((x) => ({ ...x, id: uid() }));
+                    s.menu = DEFAULT_MENU.map((x) => ({ ...x, id: uid() })); s.market = DEFAULT_MARKET.map((x) => ({ ...x, id: uid() })); s.groceries = null;
                 }
             }
             save(s); render();
@@ -2858,15 +2884,57 @@ ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `От
         /* сервисы */
         diet: (d) => { ui.diet = d.diet; render(); },
         order: (d, el, s) => {
-            const m = s.menu.find((x) => x.id === d.id);
-            if (m) placeFoodOrder(s, [{ item: m, qty: 1 }]);
+            const grocery = d.kind === 'grocery';
+            const m = (grocery ? (s.groceries || []) : s.menu).find((x) => x.id === d.id);
+            if (m) placeFoodOrder(s, [{ item: m, qty: 1 }], grocery ? 'grocery' : 'food');
+        },
+        findMissing: (d, el, s) => {
+            const grocery = ui.deliveryTab === 'grocery';
+            const list = deliveryList(s);
+            const text = val('sh-o-text');
+            const { missing } = parseOrder(s, text, list);
+            if (!missing.length) return;
+            const tags = [...new Set(list.flatMap((m) => m.tags || []))];
+            const prices = list.slice(0, 6).map((m) => `${m.title} — ${m.price} ₡`).join('; ');
+            return withBusy('Ищу под заказ…', async () => {
+                const r = await aiJSON(`${world(s)}\n\n${grocery ? 'Продуктовый магазин кампуса с доставкой.' : 'Доставка готовой еды по кампусу из кафе и столовых.'} Студент хочет заказать то, чего нет в ассортименте: ${missing.join('; ')}.
+Для каждой позиции реши, можно ли это реально ${grocery ? 'купить' : 'заказать'} в этом мире (${mundane(s) ? 'обычный современный город и университет, без магии' : 'сверхъестественный мир этого университета — магические продукты здесь доступны'}). Если да — дай нормальное название по-русски${grocery ? ' с весом или объёмом' : ''}, место (${grocery ? 'магазин или лавка' : 'кафе или столовая'}), правдоподобную цену в ₡ (редкое и деликатесы дороже; для ориентира: ${prices}) и категорию из существующих: ${tags.join(', ')}. Если нельзя — коротко объясни почему и предложи замену из доступного, если она есть.
+Формат: [{"query":"как написал студент","ok":true,"title":"","place":"","price":120,"tag":"","reason":"","substitute":""}]`);
+                const res = (Array.isArray(r) ? r : []).filter((x) => x && x.query);
+                if (!res.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
+                const found = {}, refused = [];
+                for (const x of res) {
+                    const q = String(x.query).trim().toLowerCase();
+                    if ((x.ok === true || x.ok === 'true') && x.title && +x.price > 0) {
+                        const it = { id: uid(), title: cleanMsg(x.title).slice(0, 80), place: cleanMsg(x.place || (grocery ? 'Минимаркет кампуса' : 'Кафе кампуса')).slice(0, 60), price: clamp(Math.round(+x.price), 10, 2000), tags: [String(x.tag || tags[0] || 'другое').toLowerCase().slice(0, 24)], special: true };
+                        list.unshift(it);
+                        found[q] = it.title;
+                    } else refused.push(`${x.query}${x.reason ? ` — ${cleanMsg(x.reason)}` : ''}${x.substitute ? `. Замена: ${cleanMsg(x.substitute)}` : ''}`);
+                }
+                // подставляем найденные названия прямо в текст заказа
+                const ta = byId('sh-o-text');
+                if (ta) ta.value = String(text).split(/[,;\n]+/).map((p) => p.trim()).filter(Boolean).map((p) => {
+                    const m = /^(\d+)\s*(шт\.?|x|х|×)?\s+/i.exec(p) || /\s*(x|х|×)\s*(\d+)\s*$/i.exec(p);
+                    const bare = m ? (m.index === 0 ? p.slice(m[0].length) : p.slice(0, m.index)) : p;
+                    const t = found[bare.trim().toLowerCase()];
+                    if (!t) return p;
+                    const qty = m ? (m.index === 0 ? m[1] : m[2]) : '';
+                    return `${qty ? `${qty} ` : ''}${t}`;
+                }).join(', ');
+                const n = Object.keys(found).length;
+                if (n) toast('success', `Найдено под заказ: ${Object.values(found).join(', ')}. Добавлено ${grocery ? 'в магазин' : 'в меню'} и в ваш заказ.`);
+                if (refused.length) toast('warning', `Не получилось: ${refused.join('; ')}`);
+                save(s);
+            });
         },
         orderText: (d, el, s) => {
             const text = val('sh-o-text');
-            const { lines, missing } = parseOrder(s, text);
-            if (!lines.length) return toast('warning', missing.length ? `Этого нет в меню: ${missing.join(', ')}. Обновите меню или выберите из списка.` : 'Впишите, что хотите заказать, через запятую.');
-            if (missing.length && !confirm(`Этого нет в меню, оно не войдёт в заказ: ${missing.join(', ')}. Заказать остальное?`)) return;
-            if (placeFoodOrder(s, lines)) { const e = byId('sh-o-text'); if (e) e.value = ''; render(); }
+            const grocery = ui.deliveryTab === 'grocery';
+            const { lines, missing } = parseOrder(s, text, deliveryList(s));
+            const where = grocery ? 'в магазине' : 'в меню';
+            if (!lines.length) return toast('warning', missing.length ? `Этого нет ${where}: ${missing.join(', ')}. Обновите список или выберите из него.` : 'Впишите, что хотите заказать, через запятую.');
+            if (missing.length && !confirm(`Этого нет ${where}, оно не войдёт в заказ: ${missing.join(', ')}. Заказать остальное?`)) return;
+            if (placeFoodOrder(s, lines, grocery ? 'grocery' : 'food')) { const e = byId('sh-o-text'); if (e) e.value = ''; render(); }
         },
         parcel: (d, el, s) => {
             const to = val('sh-p-to'), what = val('sh-p-what');
@@ -2890,6 +2958,21 @@ ${story ? `Последние события истории:\n${story}\nЕсли
             save(s);
         }),
 
+        dTab: (d) => { ui.deliveryTab = d.t; const e = byId('sh-o-text'); if (e) e.value = ''; render(); },
+        gcat: (d) => { ui.gcat = d.c; render(); },
+        genGroceries: (d, el, s) => withBusy('Обновляю продукты…', async () => {
+            const story = recentStory(15);
+            const r = await aiJSON(`${world(s)}\n\nСоставь ассортимент продуктового магазина кампуса для доставки: 32–36 продуктов для готовки, 7–9 категорий (молочное, мясо и рыба, бакалея, овощи и зелень, фрукты, хлеб и сладкое, специи и напитки${mundane(s) ? '' : ', продукты для разных видов этого мира'} и т.п.), минимум 3 продукта в каждой категории. Названия на русском, с объёмом или весом, где уместно. Цены в ₡ от 20 до 300.
+${story ? `Последние события истории:\n${story}\nЕсли в истории ${ctx().name2}, ${s.profile.name} или кто-то ещё собирался приготовить конкретное блюдо — обязательно включи ВСЕ нужные для него ингредиенты и у каждого укажи forDish: название блюда.\n` : ''}Формат: [{"title":"","place":"магазин","price":80,"tags":["бакалея"],"forDish":""}] — одна категория в tags, строчными буквами.`);
+            const list = (Array.isArray(r) ? r : []).filter((m) => m && m.title && +m.price > 0);
+            if (!list.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
+            s.groceries = list.map((m) => ({ id: uid(), title: cleanMsg(m.title).slice(0, 80), place: cleanMsg(m.place || 'Минимаркет кампуса').slice(0, 60), price: Math.round(+m.price), tags: (Array.isArray(m.tags) ? m.tags : []).map((t) => String(t).toLowerCase().slice(0, 24)).slice(0, 1), forDish: cleanMsg(m.forDish || '').slice(0, 60) }));
+            s.groceries.sort((a, b) => (b.forDish ? 1 : 0) - (a.forDish ? 1 : 0));
+            ui.gcat = 'all';
+            const dishes = [...new Set(s.groceries.map((g) => g.forDish).filter(Boolean))];
+            if (dishes.length) toast('info', `Отмечены продукты для: ${dishes.join(', ')}`);
+            save(s);
+        }),
         mTab: (d) => { ui.marketTab = d.t; render(); },
         mcat: (d) => { ui.mcat = d.c; render(); },
         buy: (d, el, s) => {

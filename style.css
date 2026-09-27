@@ -447,3 +447,5 @@
 #unihub-phone .sh-oline { display: flex; justify-content: space-between; gap: 10px; padding: 3px 2px; font-size: 13px; }
 #unihub-phone .sh-oline.total { border-top: 1px solid var(--sh-line); margin-top: 4px; padding-top: 6px; }
 #unihub-phone .sh-oline.total b { color: var(--sh-amber); }
+
+#unihub-phone .sh-find { margin: 6px 0 2px; }
