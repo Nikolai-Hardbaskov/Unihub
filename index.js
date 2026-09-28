@@ -2125,7 +2125,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.15.6 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.15.7 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2256,6 +2256,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             const sc = currentScene();
             if (sc) extra += `\n\nТекущий момент основной истории: ${sc}`;
         }
+        if (th.kind !== 'group') extra += `\n\nЭТО ЛИЧНАЯ ПЕРЕПИСКА только между ${th.name} и ${s.profile.name}: её никто больше не видит. Не обращайся в ней к третьим лицам («Майкл, скажи спасибо…», «@Келлер»), не пиши так, будто это комментарии или общий чат, — о других говори в третьем лице («скажу Майклу», «Майкл пусть спасибо скажет»). Комментарии в ленте — отдельное место.`;
         if (th.kind !== 'group') extra += `\n\nПРАВИЛО ПРИСУТСТВИЯ: кто по текущей сцене находится рядом с ${s.profile.name} (в одном помещении, в одной машине, за одним столом), общается с ней/ним вслух. Никогда не проси ${s.profile.name} «передать», «сказать» или «попросить» того, кто сейчас рядом с ней/ним, — ты бы сказал(а) это сам(а) или написал(а) этому человеку напрямую. Если ты сам(а) — ${th.name} — сейчас рядом с ${s.profile.name}, ${opts.initiate ? 'ты не пишешь в мессенджер: верни reply пустой строкой ""' : 'ответь с учётом этого (удивись сообщению, скажи вслух или коротко напиши)'}.`;
         const who = th.kind === 'group'
             ? `участников учебной группы «${th.name}» (${th.bio}). Пиши от лица одного из участников в формате "Имя: текст".`
