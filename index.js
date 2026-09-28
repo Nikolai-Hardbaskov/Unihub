@@ -1627,6 +1627,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         <div class="sh-chips">${Object.entries(chips).map(([k, v]) => `<button class="sh-chip ${ui.channel === k ? 'on' : ''}" data-act="channel" data-ch="${k}">${esc(k === 'species' && s.profile.species ? s.profile.species : v)}</button>`).join('')}</div>
         <div class="sh-card sh-compose">
           <textarea id="sh-post" rows="2" placeholder="Что нового, ${esc(s.profile.name)}?"></textarea>
+          <div class="sh-row sh-mediain"><select id="sh-post-kind" aria-label="Вложение"><option value="">Без вложения</option><option value="photo">📷 Фото</option><option value="video">🎬 Видео</option></select><input id="sh-post-media" placeholder="Что на фото или видео — опишите"></div>
           <div class="sh-row"><select id="sh-post-ch">${Object.entries(CHANNELS).filter(([k]) => k !== 'all').map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select>
           <button class="sh-btn sm" data-act="post">Опубликовать</button></div>
         </div>
@@ -2125,7 +2126,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.15.7 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.15.8 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2295,6 +2296,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const quarrel = ct?.conflict ? ` Сейчас они в ссоре: ${ct.conflict.why}.` : '';
         return `\n${c} (персонаж основной истории) МОЖЕТ оставить комментарий, но не обязан. Его отношения с ${s.profile.name}: ${rel}.${quarrel} Реши по его характеру и этим отношениям: близкий или влюблённый поддержит; враг съязвит, поддразнит или демонстративно промолчит; в ссоре — промолчит, ответит холодно или колко; незнакомец обычно не комментирует. Если молчание уместнее — не включай его. Не противоречь текущей сцене.`;
     }
+    const postText = (p) => `${p.text || ''}${p.media ? ` [${p.kind === 'video' ? 'видео' : 'фото'}: ${p.media}]` : ''}`;
     async function aiComments(s, p, task, scoreWhat) {
         const prev = shownComments(p).slice(-12).map((c) => `${c.author}${c.replyTo ? ` → ${c.replyTo}` : ''}: ${c.text}`).join('\n');
         const st = p.story ? s.stories.find((x) => x.title === p.story) : null;
@@ -2303,7 +2305,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             p.mine && cancelled(s) ? `Сейчас ${s.profile.name} «отменяют» в сети: большинство комментаторов настроены враждебно, лишь пара человек заступается.` : '',
         ].filter(Boolean).join('\n');
         const scoreFmt = scoreWhat ? `\nТакже оцени ${scoreWhat} ${s.profile.name}: authority (−5…5 — насколько это подняло авторитет ${s.profile.name}: остроумие, смелость, поддержка, интересная мысль — плюс; грубость, кринж, глупость — минус), controversy (0…10 — насколько спорно или токсично), sentiment (positive, mixed или negative — как восприняло сообщество). Реакция комментаторов должна соответствовать оценке.\nЕсли кто-то из комментаторов пообещал написать ${s.profile.name} в личку, начал договариваться с ней/ним о встрече или явно хочет продолжить разговор наедине — заполни followup: {"from":"имя этого комментатора","is_char":true если это ${ctx().name2} — персонаж основной истории, иначе false,"intent":"что он(а) напишет в личке — например, уточнит день, время и место встречи"}. Иначе followup: null.` : '';
-        const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${p.text}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}${loreStudentsLine(s, 8)}${ctx().name2 && !ctx().groupId && (p.mine || Math.random() < 0.4) ? charCommentRule(s) : ''}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
+        const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${postText(p)}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}${loreStudentsLine(s, 8)}${ctx().name2 && !ctx().groupId && (p.mine || Math.random() < 0.4) ? charCommentRule(s) : ''}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
         const arr = Array.isArray(r) ? r : (Array.isArray(r?.comments) ? r.comments : []);
         const list = arr.filter((c) => c && c.author && c.text && cleanName(c.author) !== s.profile.name).slice(0, 8).map((c) => ({
             id: uid(), author: cleanName(c.author), species: SP(s, c.species), text: stripMention(cleanMsg(c.text), cleanName(c.replyTo)).slice(0, 400),
@@ -2464,11 +2466,16 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         /* лента */
         channel: (d) => { ui.channel = d.ch; render(); },
         post: (d, el, s) => {
-            const text = val('sh-post');
-            if (!text) return toast('warning', 'Напишите текст поста.');
-            const p = { id: uid(), author: s.profile.name, species: s.profile.privacy.species ? s.profile.species : '', channel: val('sh-post-ch') || 'general', text, likes: 0, mine: true, t: Date.now(), comments: [], commentsLoaded: true };
+            let text = val('sh-post');
+            let kind = val('sh-post-kind'), media = val('sh-post-media');
+            // «>фото стола с едой» или «[фото: …]» в тексте тоже становится вложением
+            const m = /(?:^|\n)\s*(?:>\s*|\[\s*)(фото|видео|photo|video)\s*:?\s*([^\]\n]+)\]?\s*$/i.exec(text);
+            if (m && !media) { media = `${m[1].toLowerCase().replace('photo', 'фото').replace('video', 'видео')} ${m[2].trim().replace(/[.\s]+$/, '')}`; kind = /вид|vid/i.test(m[1]) ? 'video' : 'photo'; text = text.slice(0, m.index).trim(); }
+            if (media && !kind) kind = 'photo';
+            if (!text && !media) return toast('warning', 'Напишите текст поста или опишите фото.');
+            const p = { id: uid(), author: s.profile.name, kind: kind || undefined, media: media || undefined, species: s.profile.privacy.species ? s.profile.species : '', channel: val('sh-post-ch') || 'general', text, likes: 0, mine: true, t: Date.now(), comments: [], commentsLoaded: true };
             s.feed.unshift(p);
-            byId('sh-post').value = '';
+            byId('sh-post').value = ''; if (byId('sh-post-media')) byId('sh-post-media').value = ''; if (byId('sh-post-kind')) byId('sh-post-kind').value = '';
             save(s); render();
             questEvent(s, 'post', 1, '', text);
             engageMyPost(s, p);

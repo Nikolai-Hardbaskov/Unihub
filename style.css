@@ -464,3 +464,7 @@
 #unihub-phone .sh-composer .sh-pending .sh-row { margin-top: 6px; }
 
 #unihub-phone .sh-composer { box-shadow: 0 16px 0 0 var(--sh-ink); }
+
+#unihub-phone .sh-mediain { flex-wrap: nowrap !important; margin: 6px 0; }
+#unihub-phone .sh-mediain select { flex: 0 0 auto; width: auto; max-width: 42%; }
+#unihub-phone .sh-mediain input { flex: 1; min-width: 0; }
