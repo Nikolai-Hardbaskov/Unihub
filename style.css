@@ -454,3 +454,11 @@
 #unihub-phone .sh-li.static small { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
 #unihub-phone .sh-search { flex-wrap: nowrap !important; margin-top: 0; }
 #unihub-phone .sh-search input { flex: 1; min-width: 0; margin: 0; }
+
+/* диалог: шапка закреплена сверху, договорённость — у поля ввода */
+#unihub-phone .sh-ttop { position: sticky; top: -12px; z-index: 5; margin: -12px -12px 8px; padding: 12px 12px 4px; background: var(--sh-ink); border-bottom: 1px solid var(--sh-line); }
+#unihub-phone .sh-ttop .sh-head { margin-bottom: 6px; }
+#unihub-phone .sh-ttop .sh-rel { margin: 0 0 6px; }
+#unihub-phone .sh-composer { z-index: 5; }
+#unihub-phone .sh-composer .sh-pending { margin: 0 0 8px; padding: 8px 10px; }
+#unihub-phone .sh-composer .sh-pending .sh-row { margin-top: 6px; }
