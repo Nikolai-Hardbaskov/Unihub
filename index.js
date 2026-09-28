@@ -422,10 +422,13 @@
         return '';
     }
     /** Убирает размышления модели и служебные блоки других расширений (Horae и т.п.). */
+    const STRIP_TAGS = 'horae\\w*|status\\w*|state\\w*|stats|info|details|summary|meta|tracker\\w*|scene\\w*|time|location|memory|event\\w*|plot\\w*|update\\w*|note\\w*';
     const stripThink = (t) => String(t || '')
         .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
-        .replace(/<(horae|status|state|stats|info|details|summary|meta|tracker|scene|time|location|memory)\b[^>]*>[\s\S]*?(<\/\1>|$)/gi, '')
-        .replace(/<\/?(horae|status|state|stats|info|details|summary|meta|tracker|scene)\b[^>]*>/gi, '');
+        .replace(new RegExp(`<(${STRIP_TAGS})\\b[^>]*>[\\s\\S]*?(<\\/\\1\\s*>|$)`, 'gi'), '')
+        .replace(/<([a-z][\w-]{2,})\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+        .replace(/<\/?[a-z][\w-]*\b[^>]*>/gi, '')
+        .replace(/\n{3,}/g, '\n\n');
     /** Для текста сообщений: ещё и «шапки», которые модель иногда дописывает. */
     function cleanReply(t) {
         return stripThink(t)
@@ -1713,7 +1716,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         <div class="sh-row sh-card"><input id="sh-newchat" placeholder="Имя студента или преподавателя"><button class="sh-btn sm" data-act="newChat">Написать</button></div>
         ${list.length ? list.map((t) => {
         const last = t.msgs[t.msgs.length - 1];
-        return `<button class="sh-li" data-act="go" data-view="thread" data-param="${t.id}">${t.kind === 'official' ? '<span class="sh-ava" style="background:linear-gradient(135deg,#6b4a4f,#8a6168)"><i class="fa-solid fa-building-columns"></i></span>' : t.kind === 'group' ? '<span class="sh-ava" style="background:linear-gradient(135deg,#4f5a75,#6c7897)"><i class="fa-solid fa-users"></i></span>' : ava(t.name, false, t.species)}<div><b>${esc(t.name)}</b> ${t.kind === 'group' ? badge('группа') : t.kind === 'official' ? badge('официально', 'bad') : t.species ? badge(t.species) : ''}<small>${last ? esc((last.me ? 'Вы: ' : '') + last.text).slice(0, 70) : 'Нет сообщений'}</small></div>${t.unread ? `<b class="sh-dot">${t.unread}</b>` : ''}</button>`;
+        return `<button class="sh-li" data-act="go" data-view="thread" data-param="${t.id}">${t.kind === 'official' ? '<span class="sh-ava" style="background:linear-gradient(135deg,#6b4a4f,#8a6168)"><i class="fa-solid fa-building-columns"></i></span>' : t.kind === 'group' ? '<span class="sh-ava" style="background:linear-gradient(135deg,#4f5a75,#6c7897)"><i class="fa-solid fa-users"></i></span>' : ava(t.name, false, t.species)}<div><b>${esc(t.name)}</b> ${t.kind === 'group' ? badge('группа') : t.kind === 'official' ? badge('официально', 'bad') : t.species && !mundane(s) ? badge(t.species) : ''}<small>${last ? esc((last.me ? 'Вы: ' + last.text : stripThink(last.text).trim())).slice(0, 70) : 'Нет сообщений'}</small></div>${t.unread ? `<b class="sh-dot">${t.unread}</b>` : ''}</button>`;
     }).join('') : empty('Диалогов пока нет. Напишите кому-нибудь из ленты или найдите пару в знакомствах.')}`;
     }
     function threadView(s, id) {
@@ -1722,12 +1725,12 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         th.unread = 0;
         if (needsRelSync(s, th)) setTimeout(() => syncRel(s, th).catch((e) => logErr('Отношения', e)), 0);
         const rl = th.relSyncing ? 'определяю отношения…' : relLabel(th), rv = Math.round(th.rel || 0);
-        return `<div class="sh-ttop">${head(th.name, `${th.species ? esc(th.species) + ', ' : ''}<i class="fa-solid fa-lock"></i> зашифровано`)}
+        return `<div class="sh-ttop">${head(th.name, `${th.species && !mundane(s) ? esc(th.species) + ', ' : ''}<i class="fa-solid fa-lock"></i> зашифровано`)}
         ${th.kind === 'group' || th.kind === 'official' ? '' : `<div class="sh-rel"><div><small>${esc(rl)}${th.beef ? ' · бифф' : ''}${th.kind === 'char' && s.profile.relWithChar && rl !== 'пара' ? ' · вы пара' : ''}${relevantForSync(s, th) && !th.relSyncing ? ` <button class="sh-relsync" data-act="syncRel" data-id="${th.id}" title="${esc(th.relNote || 'Обновить по истории')}" aria-label="Обновить отношения по истории"><i class="fa-solid fa-rotate"></i></button>` : ''}</small><div class="sh-relbar"><span class="${rv < 0 ? 'neg' : ''}" style="width:${Math.abs(rv) / 2}%;${rv < 0 ? 'right:50%' : 'left:50%'}"></span></div></div>
           <button class="sh-btn sm ghost" data-act="go" data-view="meet" data-param="${th.id}"><i class="fa-solid fa-calendar-plus"></i> Встреча</button></div>`}</div>
         <div class="sh-msgs">${th.msgs.map((m) => m.sys
         ? `<div class="sh-sys">${esc(m.text)}</div>`
-        : `<div class="sh-msg ${m.me ? 'me' : ''}">${m.from ? `<b>${esc(m.from)}</b>` : ''}${esc(m.text)}<time>${fmtT(m.gt ?? m.t)}</time></div>`).join('')}
+        : `<div class="sh-msg ${m.me ? 'me' : ''}">${m.from ? `<b>${esc(m.from)}</b>` : ''}${esc(m.me ? m.text : stripThink(m.text).trim())}<time>${fmtT(m.gt ?? m.t)}</time></div>`).join('')}
         ${th.typing ? `<div class="sh-msg typing">${esc(th.name)} печатает…</div>` : ''}</div>
         <div class="sh-composer">${th.pendingMeet ? `<div class="sh-card sh-pending"><b><i class="fa-solid fa-handshake"></i> Похоже, вы договорились о встрече</b>
           <small>${esc(KINDS[th.pendingMeet.kind])}, ${fmtWhen(th.pendingMeet.at)}, ${esc(PLACES[th.pendingMeet.place])}${th.pendingMeet.note ? ` (${esc(th.pendingMeet.note)})` : ''}</small>
@@ -2126,7 +2129,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.15.8 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.15.9 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2213,6 +2216,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     /* ───────────────────────── действия ───────────────────────── */
 
     function openThread(s, name, species = '', bio = '', kind = 'dm') {
+        if (mundane(s)) species = '';
         name = String(name).trim();
         let th = s.threads.find((t) => t.name.toLowerCase() === name.toLowerCase());
         if (!th) {
