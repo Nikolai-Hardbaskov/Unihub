@@ -34,6 +34,8 @@
         injectDepth: 2,
         theme: 'pearl',         // тема оформления
         shareDMs: true,         // передавать переписку UniHub в основной чат
+        proactiveDMs: true,     // знакомые могут писать первыми при закрытом телефоне
+        proactiveMin: 5,        // минимальный интервал между инициативными сообщениями
         timeMode: 'game',       // для новых чатов: game — часы истории, real — реальное время
         syncHorae: true,        // брать время из расширения Horae, если найдено
         syncAI: true,           // ИИ определяет прошедшее время по тексту ответа
@@ -116,7 +118,7 @@
     };
     const badge = (t, cls = '') => t ? `<span class="sh-badge ${cls}">${esc(t)}</span>` : '';
     const empty = (t) => `<div class="sh-empty">${t}</div>`;
-    const head = (title, sub = '') => `<div class="sh-head"><button class="sh-icon" data-act="back" aria-label="Назад"><i class="fa-solid fa-chevron-left"></i></button><div><h3>${esc(title)}</h3>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
+    const head = (title, sub = '', after = '') => `<div class="sh-head"><button class="sh-icon" data-act="back" aria-label="Назад"><i class="fa-solid fa-chevron-left"></i></button><div><h3>${esc(title)}${after}</h3>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
     const toast = (type, msg) => { try { toastr[type](msg, 'UniHub'); } catch { /* нет toastr */ } };
 
     /* ───────────────────────── справочники ───────────────────────── */
@@ -746,10 +748,7 @@ task — если назначена письменная отработка; ap
         const so = soc(s);
         if (refreshQuests(s)) ch = true;
         for (const q of so.quests) if (q.hook && q.hookAt && now >= q.hookAt) { fireHook(s, q, q.hookDetail); ch = true; }
-        if (s.pendingDMs?.length) {
-            const due = s.pendingDMs.filter((x) => now >= x.at);
-            for (const pd of due) if (startDM(s, pd)) { s.pendingDMs = s.pendingDMs.filter((x) => x !== pd); ch = true; }
-        }
+        tickMessenger(s, now);
         if (tickMeetings(s, gnow)) ch = true;
         if (so.hate > 0) so.hate = Math.max(0, so.hate - 0.05);
         if (so.cancelledUntil && now >= so.cancelledUntil) { so.cancelledUntil = 0; so.hate = Math.min(so.hate, 40); ch = true; notify(s, '🌤️ Волна хейта утихла — вас больше не «отменяют».', 'important'); }
@@ -921,13 +920,9 @@ task — если назначена письменная отработка; ap
             const sp = String(h.species || '').slice(0, 40);
             const base = `${world(s)}\n\nЗадание ${s.profile.name}: «${q.t}» — ${q.desc}\nЗамысел продолжения: ${h.intent || h.text || ''}\nПоводом стало действие ${s.profile.name}: ${act}${detail ? ` — «${String(detail).slice(0, 300)}»` : ''}.`;
             if (h.type === 'dm') {
-                const txt = await aiText(`${base}\n\nТеперь ${who}${sp ? ` (${sp})` : ''} пишет ${s.profile.name} в личку UniHub, откликаясь именно на это действие. Напиши первое сообщение: 1–3 предложения, живо, по-русски, только текст.`);
-                if (!txt) return;
                 let th = s.threads.find((t) => t.name.toLowerCase() === who.toLowerCase());
                 if (!th) { th = { id: uid(), name: who, species: sp, bio: String(h.intent || '').slice(0, 200), kind: 'dm', msgs: [], t: Date.now(), unread: 0, rel: 0 }; s.threads.unshift(th); }
-                th.msgs.push({ me: false, text: cleanMsg(txt).slice(0, 500), t: Date.now() });
-                th.unread = (th.unread || 0) + 1; th.t = Date.now();
-                notify(s, `💬 ${who}: ${cleanMsg(txt).slice(0, 70)}`, 'important', { view: 'thread', param: th.id });
+                if (!th.pendingReply) queueMessengerReply(s, th, { initiate: `${base}\n${who} пишет первым(ой), откликаясь именно на описанное действие. Не приписывай пользователю других действий.` });
             } else if (h.type === 'post') {
                 const txt = await aiText(`${base}\n\nТеперь ${who}${sp ? ` (${sp})` : ''} публикует пост в ленте UniHub, откликаясь на это. До 280 символов, живо, по-русски, только текст поста.`);
                 if (!txt) return;
@@ -1127,8 +1122,9 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 ? `${charCard()}${field(ch, 'first_mes') ? `\nПервое сообщение истории: ${macros(field(ch, 'first_mes')).slice(0, 1200)}` : ''}`
                 : `${th.name}${th.species ? ` (${th.species})` : ''}. ${th.bio || ''}${lp ? ` Из лора: ${lp.bio}${lp.relation ? `; для ${c.name2}: ${lp.relation}` : ''}.` : ''}`;
             const dms = th.msgs.filter((m) => !m.sys).slice(-10).map((m) => `${m.me ? s.profile.name : th.name}: ${m.text}`).join('\n');
-            const r = await aiJSON(`${about}\n\nПоследние события основной истории:\n${recentStory(20) || '(истории пока нет)'}\n\nПереписка в UniHub:\n${dms || '(не переписывались)'}\n\nОпредели, какие СЕЙЧАС отношения у ${th.name} с ${s.profile.name}. Опирайся на факты: история и переписка важнее карточки — если по карточке они не знакомы, а в истории уже подружились или начали встречаться, верь истории. Если они ещё ни разу не общались и не знакомы — known: false.\nФормат: {"known":true,"rel":число от −100 (вражда) до 100 (самые близкие),"status":"короткий статус по-русски: не знакомы, знакомые, приятели, друзья, близкие друзья, флирт, пара, соперники, неприязнь, вражда…","pair":true если они сейчас в романтических отношениях,"note":"одной фразой, на чём основан вывод"}`);
+            const r = await aiJSON(`${about}\n\nПоследние события основной истории:\n${recentStory(20) || '(истории пока нет)'}\n\nПереписка в UniHub:\n${dms || '(не переписывались)'}${th.contactContext ? `\nЗнакомство в UniHub: ${th.contactContext}` : ''}\n\nОпредели, какие СЕЙЧАС отношения у ${th.name} с ${s.profile.name}. Опирайся на факты: история и переписка важнее карточки — если по карточке они не знакомы, а в истории уже подружились или начали встречаться, верь истории. Если они ещё ни разу не общались и не знакомы — known: false.\nФормат: {"known":true,"rel":число от −100 (вражда) до 100 (самые близкие),"status":"короткий статус по-русски: не знакомы, знакомые, приятели, друзья, близкие друзья, флирт, пара, соперники, неприязнь, вражда…","pair":true если они сейчас в романтических отношениях,"note":"одной фразой, на чём основан вывод","presence":{"busy":false,"sleeping":false,"nearby":false,"minutes":30,"reason":""}}\nПоле presence: по текущей сцене, а не прошлым планам, занят ли собеседник сейчас (работает, учится, за рулём и т.п.), спит ли он, находится ли рядом с пользователем; minutes — примерный остаток занятости в минутах истории. Если подтверждения занятости нет, busy и sleeping false. nearby true только если прямо сейчас они в одном месте. Не придумывай распорядок из профессии или карточки.`);
             if (S() !== s || relationSyncKey(th) !== syncKey || s.clock?.mode !== clockMode || !r || typeof r !== 'object') return;
+            applyPresence(s, th, r.presence);
             th.known = r.known !== false;
             th.rel = clamp(Math.round(+r.rel || 0), -100, 100);
             th.relAtSync = th.rel;
@@ -1852,7 +1848,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
         return { name, species, followers: 20 + (h % 900), following: s.social.following.includes(name) };
     }
-    const nameBtn = (name, species) => `<button class="sh-name" data-act="person" data-name="${esc(name)}">${esc(name)}</button>${species ? ` ${badge(species)}` : ''}`;
+    const nameBtn = (name, species) => `<button class="sh-name" data-act="person" data-name="${esc(name)}">${esc(name)}${presenceDot(S(), name)}</button>${species ? ` ${badge(species)}` : ''}`;
     function postHTML(p, s, full = false) {
         const n = shownComments(p).length;
         return `<article class="sh-card sh-post ${p.story ? 'story' : ''}">
@@ -1981,12 +1977,12 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     /* — чаты — */
     function chatsTab(s) {
         const list = [...s.threads].sort((a, b) => b.t - a.t);
-        const typing = (s.pendingDMs || []).map((pd) => `<div class="sh-li static">${ava(pd.from, false, pd.species)}<div><b>${esc(pd.isChar ? (s.threads.find((t) => t.kind === 'char')?.name || pd.from) : pd.from)}</b><small class="sh-typing">✍️ пишет вам…</small></div></div>`).join('');
+        const typing = (s.pendingDMs || []).map((pd) => `<div class="sh-li static">${ava(pd.from, false, pd.species)}<div><b>${esc(pd.isChar ? (s.threads.find((t) => t.kind === 'char')?.name || pd.from) : pd.from)}</b><small>ожидается отклик…</small></div></div>`).join('');
         return `<h3 class="sh-h">Сообщения <small><i class="fa-solid fa-lock"></i> сквозное шифрование</small></h3>${typing}
         <div class="sh-row sh-card"><input id="sh-newchat" placeholder="Имя студента или преподавателя"><button class="sh-btn sm" data-act="newChat">Написать</button></div>
         ${list.length ? list.map((t) => {
         const last = t.msgs[t.msgs.length - 1];
-        return `<button class="sh-li" data-act="go" data-view="thread" data-param="${t.id}">${t.kind === 'official' ? '<span class="sh-ava" style="background:linear-gradient(135deg,#6b4a4f,#8a6168)"><i class="fa-solid fa-building-columns"></i></span>' : t.kind === 'group' ? '<span class="sh-ava" style="background:linear-gradient(135deg,#4f5a75,#6c7897)"><i class="fa-solid fa-users"></i></span>' : ava(t.name, false, t.species)}<div><b>${esc(t.name)}</b> ${t.kind === 'group' ? badge('группа') : t.kind === 'official' ? badge('официально', 'bad') : t.species && !mundane(s) ? badge(t.species) : ''}<small>${last ? esc((last.me ? 'Вы: ' + last.text : stripThink(last.text).trim())).slice(0, 70) : 'Нет сообщений'}</small></div>${t.unread ? `<b class="sh-dot">${t.unread}</b>` : ''}</button>`;
+        return `<button class="sh-li" data-act="go" data-view="thread" data-param="${t.id}">${t.kind === 'official' ? '<span class="sh-ava" style="background:linear-gradient(135deg,#6b4a4f,#8a6168)"><i class="fa-solid fa-building-columns"></i></span>' : t.kind === 'group' ? '<span class="sh-ava" style="background:linear-gradient(135deg,#4f5a75,#6c7897)"><i class="fa-solid fa-users"></i></span>' : ava(t.name, false, t.species)}<div><b>${esc(t.name)}${presenceDot(s, t.name, t.kind)}</b> ${t.kind === 'group' ? badge('группа') : t.kind === 'official' ? badge('официально', 'bad') : t.species && !mundane(s) ? badge(t.species) : ''}<small>${last ? esc((last.me ? 'Вы: ' + last.text : stripThink(last.text).trim())).slice(0, 70) : 'Нет сообщений'}</small>${privateThread(t) ? `<small>${esc(presenceLabel(s, t.name))}${t.pendingReply ? ' · ожидается ответ' : ''}</small>` : ''}</div>${t.unread ? `<b class="sh-dot">${t.unread}</b>` : ''}</button>`;
     }).join('') : empty('Диалогов пока нет. Напишите кому-нибудь из ленты или найдите пару в знакомствах.')}`;
     }
     function threadView(s, id) {
@@ -1995,13 +1991,13 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         th.unread = 0;
         if (needsRelSync(s, th) && relationAttempts.get(th) !== relationSyncKey(th)) scheduleStorySync();
         const rl = th.relSyncing ? 'определяю отношения…' : relLabel(th), rv = Math.round(th.rel || 0);
-        return `<div class="sh-ttop">${head(th.name, `${th.species && !mundane(s) ? esc(th.species) + ', ' : ''}<i class="fa-solid fa-lock"></i> зашифровано`)}
+        return `<div class="sh-ttop">${head(th.name, `${th.species && !mundane(s) ? esc(th.species) + ', ' : ''}<i class="fa-solid fa-lock"></i> зашифровано${privateThread(th) ? ` · ${esc(presenceLabel(s, th.name))}` : ''}`, presenceDot(s, th.name, th.kind))}
         ${th.kind === 'group' || th.kind === 'official' ? '' : `<div class="sh-rel"><div><small>${esc(rl)}${th.beef ? ' · бифф' : ''}${th.kind === 'char' && s.profile.relWithChar && rl !== 'пара' ? ' · вы пара' : ''}${relevantForSync(s, th) && !th.relSyncing ? ` <button class="sh-relsync" data-act="syncRel" data-id="${th.id}" title="${esc(th.relNote || 'Обновить по истории')}" aria-label="Обновить отношения по истории"><i class="fa-solid fa-rotate"></i></button>` : ''}</small><div class="sh-relbar"><span class="${rv < 0 ? 'neg' : ''}" style="width:${Math.abs(rv) / 2}%;${rv < 0 ? 'right:50%' : 'left:50%'}"></span></div></div>
           <button class="sh-btn sm ghost" data-act="go" data-view="meet" data-param="${th.id}"><i class="fa-solid fa-calendar-plus"></i> Встреча</button></div>`}</div>
         <div class="sh-msgs">${th.msgs.map((m) => m.sys
         ? `<div class="sh-sys">${esc(m.text)}</div>`
         : `<div class="sh-msg ${m.me ? 'me' : ''}">${m.from ? `<b>${esc(m.from)}</b>` : ''}${esc(m.me ? m.text : stripThink(m.text).trim())}<time>${fmtT(m.gt ?? m.t)}</time></div>`).join('')}
-        ${th.typing ? `<div class="sh-msg typing">${esc(th.name)} печатает…</div>` : ''}</div>
+        ${th.typing ? `<div class="sh-msg typing">${esc(th.name)} печатает…</div>` : th.pendingReply ? `<div class="sh-sys">${th.pendingReply.waitForFree ? 'Ответит, когда освободится' : 'Сообщение отправлено · ожидается ответ'}</div>` : ''}</div>
         <div class="sh-composer">${th.pendingMeet ? `<div class="sh-card sh-pending"><b><i class="fa-solid fa-handshake"></i> Похоже, вы договорились о встрече</b>
           <small>${esc(KINDS[th.pendingMeet.kind])}, ${fmtWhen(th.pendingMeet.at)}, ${esc(PLACES[th.pendingMeet.place])}${th.pendingMeet.note ? ` (${esc(th.pendingMeet.note)})` : ''}</small>
           ${th.pendingMeet.conflict ? `<small class="sh-bad-t"><i class="fa-solid fa-triangle-exclamation"></i> В это время у вас пара «${esc(th.pendingMeet.conflict.subject)}» (${fmtT(th.pendingMeet.conflict.start)}–${fmtT(th.pendingMeet.conflict.end)}).</small>
@@ -2383,6 +2379,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
           <label class="sh-toggle"><input type="checkbox" data-change="cfgBool" data-k="shareDMs" ${c.shareDMs ? 'checked' : ''}><span>Передавать переписку UniHub в основной чат</span></label>
           ${num('chatContext', 'Сколько сообщений истории помнит персонаж в UniHub')}
           ${num('injectDepth', 'Глубина вставки в чат')}</div>
+        <div class="sh-card sh-form"><h4>Мессенджер</h4>
+          <label class="sh-toggle"><input type="checkbox" data-change="cfgBool" data-k="proactiveDMs" ${c.proactiveDMs ? 'checked' : ''}><span>Знакомые могут писать первыми</span></label>
+          ${num('proactiveMin', 'Интервал инициативных сообщений, минут (2–60)')}
+          <small>Ответы и статусы обновляются при закрытом UniHub, пока работает страница SillyTavern. Задержки мессенджера идут по реальным минутам; часы истории не ускоряются.</small></div>
         <div class="sh-card sh-form"><h4>Правила университета</h4>
           ${num('quarterDays', 'Длина четверти, дней')}${num('maxStrikes', 'Нарушений до отчисления')}${num('lowGpa', 'Порог низкого балла', 0.1)}${num('lowGpaDays', 'Дней с низким баллом до отчисления')}
           ${num('checkInEarlyMin', 'Отметка до начала пары, мин')}${num('deadlineOffsetMin', 'Дедлайн до следующей пары, мин')}${num('extraTaskHours', 'Срок доп. задания, ч')}
@@ -2399,7 +2399,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.16.4 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.17.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2429,14 +2429,11 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     /* ───────────────────────── рендер ───────────────────────── */
 
     function updateFab() {
-        const fab = null;
-        if (!fab) return;
-        fab.style.display = cfg().showFab && !ui.open ? 'flex' : 'none';
-        const s = S();
-        const n = s ? s.notes.filter((x) => !x.read).length + s.threads.reduce((a, t) => a + (t.unread || 0), 0) : 0;
-        const b = fab.querySelector('.sh-fab-badge');
-        b.textContent = n ? String(Math.min(n, 99)) : '';
-        b.style.display = n ? '' : 'none';
+        const s = S(), n = s ? s.threads.reduce((a, t) => a + (t.unread || 0), 0) : 0;
+        const b = byId('unihub-menu-badge');
+        if (b) { b.textContent = n ? String(Math.min(n, 99)) : ''; b.style.display = n ? '' : 'none'; }
+        const button = byId('sh-cfg-open');
+        if (button) button.title = n ? `Новых сообщений: ${n}` : 'Открыть UniHub';
     }
 
     let styleDiagDone = false;
@@ -2517,47 +2514,195 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         else th.pendingMeet.problem = meetProblem(s, at, place);
         if (!(ui.open && ui.view === 'thread' && ui.param === th.id)) notify(s, `🤝 Похоже, вы договорились с ${th.name} о встрече ${fmtWhen(at)}. Подтвердите в чате.`, 'important', { view: 'thread', param: th.id });
     }
-    async function reply(s, th, opts = {}) {
-        th.typing = true; render();
-        const hist = th.msgs.filter((m) => !m.sys).slice(-14).map((m) => `${m.me ? s.profile.name : (m.from || th.name)}: ${m.text}`).join('\n');
-        let extra = '';
-        if (th.kind === 'char') {
-            const story = recentStory(Number(cfg().chatContext) || 0);
-            const lore = await loreFor(`${story}\n${hist}`);
-            const scene = currentScene();
-            extra = `\n\n${charCard()}${lore ? `\n\nЛор мира, связанный с разговором:\n${lore}` : ''}${story ? `\n\nПоследние события основной истории (${th.name} их помнит):\n${story}` : ''}${scene ? `\n\n=== ТЕКУЩИЙ МОМЕНТ ИСТОРИИ (самое важное) ===\n${scene}\n=== конец ===\nПереписка происходит ПРЯМО СЕЙЧАС, в этот самый момент истории. Строго соблюдай его: где находится ${th.name}, что делает, рядом ли ${s.profile.name}, время суток. Нельзя противоречить сцене — например, писать «я на патруле», если в сцене ${th.name} стоит у двери ${s.profile.name}. Если они сейчас рядом, ${th.name} может удивиться сообщению («я же прямо за дверью»), ответить вслух или написать с учётом этого.` : ''}`;
-        }
-        if (th.kind === 'dm') {
-            const sc = currentScene();
-            if (sc) extra += `\n\nТекущий момент основной истории: ${sc}`;
-        }
-        if (th.kind !== 'group') extra += `\n\nЭТО ЛИЧНАЯ ПЕРЕПИСКА только между ${th.name} и ${s.profile.name}: её никто больше не видит. Не обращайся в ней к третьим лицам («Майкл, скажи спасибо…», «@Келлер»), не пиши так, будто это комментарии или общий чат, — о других говори в третьем лице («скажу Майклу», «Майкл пусть спасибо скажет»). Комментарии в ленте — отдельное место.`;
-        if (th.kind !== 'group') extra += `\n\nПРАВИЛО ПРИСУТСТВИЯ: кто по текущей сцене находится рядом с ${s.profile.name} (в одном помещении, в одной машине, за одним столом), общается с ней/ним вслух. Никогда не проси ${s.profile.name} «передать», «сказать» или «попросить» того, кто сейчас рядом с ней/ним, — ты бы сказал(а) это сам(а) или написал(а) этому человеку напрямую. Если ты сам(а) — ${th.name} — сейчас рядом с ${s.profile.name}, ${opts.initiate ? 'ты не пишешь в мессенджер: верни reply пустой строкой ""' : 'ответь с учётом этого (удивись сообщению, скажи вслух или коротко напиши)'}.`;
-        const who = th.kind === 'group'
-            ? `участников учебной группы «${th.name}» (${th.bio}). Пиши от лица одного из участников в формате "Имя: текст".`
-            : th.kind === 'char'
-                ? `${th.name} — персонажа текущей истории. Строго сохраняй его характер, отношение к ${s.profile.name}, манеру речи и словечки из карточки и примеров; учитывай события истории. Пиши так, как этот персонаж писал бы в мессенджере.`
-                : `${th.name}${th.species ? ` (вид: ${th.species})` : ''}${th.bio ? `. О себе: ${th.bio}` : ''}`;
-        const relTxt = th.kind === 'group' ? '' : `\nОтношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100, шкала от −100 вражда до 100 близость).${th.relNote ? ` ${th.relNote}` : ''}${relLabel(th) === 'не знакомы' ? ` Они не знакомы — ${th.name} пишет как незнакомому человеку.` : ''}${th.kind === 'char' && s.profile.relWithChar ? ` ${th.name} и ${s.profile.name} — пара.` : ''}${jealousNote(s, th)}`;
-        const raw = await aiRaw(`${world(s)}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist || '(переписки ещё не было)'}\n\n${opts.initiate ? `${opts.initiate}\n\n` : ''}Напиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date(NOW()).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(NOW())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
-        th.typing = false;
-        if (S() !== s) return;
-        const js = th.kind === 'group' ? null : parseJSON(raw);
-        let r = cleanReply(js && typeof js.reply === 'string' ? js.reply : raw).replace(/^["«]+|["»]+$/g, '');
-        const lastMine = [...th.msgs].reverse().find((m) => m.me);
-        if (js && th.kind !== 'group') updateRel(s, th, Number(js.delta) || 0, js.flirt === true || js.flirt === 'true', 8, lastMine ? `переписка в UniHub: ${s.profile.name} написал(а) «${lastMine.text.slice(0, 140)}»` : '');
-        if (js?.meet && typeof js.meet === 'object') detectMeet(s, th, js.meet);
-        if (r) {
-            let from;
-            if (th.kind === 'group') { const m = r.match(/^\s*[*_]{0,2}([^:*_\n]{2,30})[*_]{0,2}\s*:\s*[*_]{0,2}\s*/); if (m) { from = m[1].trim(); r = r.slice(m[0].length); } }
-            else r = r.replace(new RegExp(`^\\s*[*_]{0,2}${escRe(th.name)}[*_]{0,2}\\s*:?\\s*[*_]{0,2}\\s*`, 'i'), '');
-            r = r.replace(/^\s*(\*\*|__)[^*_\n]{1,60}(\*\*|__)\s*:?\s*\n+/, '').replace(/^\s*[A-Za-zА-Яа-яЁё][^:\n]{0,40}:\s*\n+/, '');
-            r = cleanMsg(r);
-            th.msgs.push({ me: false, from, text: r, t: Date.now() });
-            th.t = Date.now();
-            if (!(ui.open && ui.view === 'thread' && ui.param === th.id)) { th.unread = (th.unread || 0) + 1; toast('info', `${th.name}: ${r.slice(0, 80)}`); notify(s, `💬 ${th.name}: ${r.slice(0, 70)}`, 'social', { view: 'thread', param: th.id }); }
-        } else if (!opts.initiate) th.msgs.push({ sys: true, text: 'Сообщение не доставлено: ИИ не ответил. Попробуйте ещё раз.', t: Date.now() });
+    /* Фоновый мессенджер: его задержки идут по реальным минутам, часы истории не меняются. */
+    const messengerQueued = new WeakSet();
+    const messengerActive = new WeakSet();
+    const messengerRand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+    const privateThread = (th) => th.kind === 'char' || th.kind === 'dm';
+    function messengerState(s) {
+        if (!s.messenger) s.messenger = { presence: {}, nextInitiativeAt: Date.now() + messengerRand(2, 5) * MIN };
+        return s.messenger;
+    }
+    function presenceFor(s, name, now = Date.now()) {
+        const ms = messengerState(s), key = `p:${String(name).trim().toLowerCase()}`;
+        let p = ms.presence[key];
+        if (!p) p = ms.presence[key] = { online: Math.random() < 0.55, until: now + messengerRand(3, 8) * MIN, busy: false, sleeping: false, nearby: false };
+        if (p.busy && p.freeAt && NOW() >= p.freeAt) { p.busy = p.sleeping = false; p.reason = ''; p.online = true; p.until = now + messengerRand(3, 8) * MIN; }
+        if (now >= p.until) { p.online = !p.online; p.until = now + messengerRand(3, 8) * MIN; }
+        if (p.sleeping || (p.busy && !(p.visitUntil > now))) p.online = false;
+        return p;
+    }
+    function applyPresence(s, th, value) {
+        if (!value || typeof value !== 'object' || typeof value.busy !== 'boolean') return;
+        const p = presenceFor(s, th.name);
+        p.busy = value.busy || value.sleeping === true;
+        p.sleeping = value.sleeping === true;
+        p.nearby = value.nearby === true;
+        p.reason = p.busy ? cleanMsg(value.reason || (p.sleeping ? 'спит' : 'занят(а)')).slice(0, 80) : '';
+        p.freeAt = p.busy ? NOW() + clamp(parseInt(value.minutes, 10) || (p.sleeping ? 480 : 30), 5, 480) * MIN : 0;
+        p.visitUntil = 0;
+        if (p.busy) p.online = false;
+        else if (th.pendingReply?.waitForFree) { p.online = true; p.until = Date.now() + 3 * MIN; }
+        p.sourceKey = storySyncKey();
+    }
+    function presenceLabel(s, name) {
+        const p = presenceFor(s, name);
+        return p.online ? 'онлайн' : p.sleeping ? 'оффлайн · спит' : p.busy ? `оффлайн · ${p.reason || 'занят(а)'}` : 'оффлайн';
+    }
+    function presenceDot(s, name, kind = 'dm') {
+        if (!s || kind === 'group' || kind === 'official') return '';
+        const label = presenceLabel(s, name);
+        return ` <span class="sh-presence ${presenceFor(s, name).online ? 'online' : 'offline'}" role="img" aria-label="${esc(label)}" title="${esc(label)}"></span>`;
+    }
+    function lastUserKey(th) {
+        const m = [...th.msgs].reverse().find((m) => m.me && !m.sys);
+        return m ? JSON.stringify([m.id || m.t, m.text]) : '';
+    }
+    function queueMessengerReply(s, th, opts = {}, now = Date.now()) {
+        const p = privateThread(th) ? presenceFor(s, th.name, now) : { online: true };
+        const old = th.pendingReply;
+        const waitForFree = !!(p.sleeping || (p.busy && Math.random() < 0.5));
+        const delay = p.online ? (Math.random() < 0.6 ? 0 : messengerRand(1, 3) * MIN) : messengerRand(3, 7) * MIN;
+        const job = { id: uid(), at: now + delay, waitForFree, checkIn: !p.online && !waitForFree,
+            userKey: lastUserKey(th), initiate: opts.initiate || '', proactive: !!opts.proactive, attempts: 0 };
+        // Несколько сообщений до ответа объединяются; ожидание не начинается заново.
+        if (old && !opts.initiate) { job.at = Math.min(old.at, job.at); job.waitForFree = old.waitForFree; job.checkIn = old.checkIn; }
+        th.pendingReply = job;
         save(s); render();
+        tickMessenger(s, now, false);
+        return job;
+    }
+    function dispatchMessengerReply(s, th, job, now) {
+        if (th.typing || messengerQueued.has(job) || job.at > now) return false;
+        const p = privateThread(th) ? presenceFor(s, th.name, now) : { online: true };
+        if (p.sleeping || (p.busy && job.waitForFree)) { job.at = now + 30 * 1000; return true; }
+        if (!p.online) {
+            if (p.busy && !job.checkIn) { job.waitForFree = true; job.at = now + 30 * 1000; return true; }
+            p.online = true; p.visitUntil = now + 2 * MIN; p.until = p.visitUntil;
+        }
+        messengerQueued.add(job);
+        enqueue(s, async () => {
+            if (storyGenerating || uniHubGenerating || th.pendingReply !== job) return;
+            const sourceKey = storySyncKey();
+            const valid = () => S() === s && th.pendingReply === job && lastUserKey(th) === job.userKey && !storyGenerating && storySyncKey() === sourceKey
+                && (!job.proactive || (cfg().proactiveDMs && hasStoryProgress() && !presenceFor(s, th.name).busy && !presenceFor(s, th.name).nearby));
+            if (privateThread(th)) {
+                const current = presenceFor(s, th.name);
+                if (current.sleeping || (current.busy && job.waitForFree)) { job.at = Date.now() + 30 * 1000; return; }
+                current.online = true; current.visitUntil = Date.now() + 2 * MIN; current.until = current.visitUntil;
+            }
+            try {
+                const r = await reply(s, th, { initiate: job.initiate, proactive: job.proactive, valid, availability: p.busy ? 'Собеседник занят и ненадолго заглянул в мессенджер. Ответь коротко, не утверждай, что он уже освободился.' : '' });
+                if (th.pendingReply !== job || S() !== s) return;
+                if (r?.stale) { job.at = Date.now() + 20 * 1000; return; }
+                delete th.pendingReply;
+                if (r?.sent) { th.lastIncomingAt = Date.now(); th.lastIncomingStoryKey = sourceKey; }
+            } catch (e) {
+                logErr('Фоновая переписка', e);
+                if (th.pendingReply !== job || S() !== s) return;
+                if (++job.attempts < 3) job.at = Date.now() + job.attempts * MIN;
+                else { delete th.pendingReply; if (!job.initiate) th.msgs.push({ sys: true, text: 'Ответ пока не удалось получить. Попробуйте написать позже.', t: Date.now() }); }
+            }
+        }).finally(() => messengerQueued.delete(job));
+        return true;
+    }
+    function planInitiative(s, now) {
+        const ms = messengerState(s);
+        if (!cfg().proactiveDMs || !hasStoryProgress() || now < ms.nextInitiativeAt) return false;
+        const interval = clamp(parseInt(cfg().proactiveMin, 10) || 5, 2, 60) * MIN;
+        ms.nextInitiativeAt = now + interval + messengerRand(0, 3) * MIN;
+        const candidates = s.threads.filter((th) => {
+            if (!privateThread(th) || th.typing || th.pendingReply || th.unread || th.known === false) return false;
+            if (relevantForSync(s, th) && !th.relSyncKey) return false;
+            const p = presenceFor(s, th.name, now), last = [...th.msgs].reverse().find((m) => !m.sys);
+            if (p.busy || p.sleeping || p.nearby) return false;
+            if (last && !last.me && (last.initiative || now - last.t < 20 * MIN || th.lastIncomingStoryKey === storySyncKey())) return false;
+            return now - (th.lastInitiativeAt || 0) >= 20 * MIN && (th.kind === 'char' || th.known === true || th.msgs.length > 0);
+        });
+        if (!candidates.length) return true;
+        const th = candidates[messengerRand(0, candidates.length - 1)];
+        th.lastInitiativeAt = now;
+        queueMessengerReply(s, th, { proactive: true, initiate: `${th.name} может сам(а) написать ${s.profile.name} первым(ой). ${th.contactContext ? `Знакомство в UniHub: ${th.contactContext}.` : ''} Найди естественный повод по характеру, отношениям, текущей истории или предыдущей переписке: спросить как дела, поделиться мыслью, уточнить планы. Не выдумывай, что пользователь уже написал комментарий, выполнил задание или что вы договорились о встрече. Если повода нет, отношения не предполагают такого общения или вы сейчас рядом — верни reply пустой строкой. Не напоминать бесконечно и не повторять прошлую реплику.` }, now);
+        return true;
+    }
+    function tickMessenger(s = S(), now = Date.now(), initiatives = true) {
+        if (!s?.auth || S() !== s) return false;
+        let changed = false;
+        messengerState(s);
+        if (cfg().proactiveDMs && hasStoryProgress() && ctx().name2 && !ctx().groupId && !s.threads.some((th) => th.kind === 'char')) {
+            s.threads.push({ id: uid(), name: ctx().name2, kind: 'char', bio: '', species: '', msgs: [], rel: 0, unread: 0, t: now });
+            scheduleStorySync(); changed = true;
+        }
+        if (cfg().proactiveDMs && hasStoryProgress()) {
+            const contacts = [...(s.dating?.matches || []).map((p) => ({ ...p, context: 'взаимная симпатия в знакомствах' })),
+                ...s.feed.filter((p) => !p.mine && p.comments?.some((c) => c.mine)).map((p) => ({ name: p.author, species: p.species, context: `Пост «${postText(p).slice(0, 140)}». Комментарий пользователя: «${p.comments.filter((c) => c.mine).slice(-1)[0].text.slice(0, 100)}»` }))].slice(0, 8);
+            for (const p of contacts) {
+                if (!p.name || p.name === s.profile.name || s.threads.some((th) => th.name.toLowerCase() === p.name.toLowerCase())) continue;
+                s.threads.push({ id: uid(), name: p.name, species: p.species || '', bio: p.bio || '', contactContext: p.context, kind: 'dm', known: true, msgs: [], rel: 0, unread: 0, t: now });
+                scheduleStorySync(); changed = true;
+            }
+        }
+        for (const th of s.threads) if (privateThread(th)) {
+            const before = JSON.stringify(messengerState(s).presence[`p:${th.name.trim().toLowerCase()}`]);
+            const p = presenceFor(s, th.name, now);
+            if (JSON.stringify(p) !== before) changed = true;
+        }
+        for (const th of s.threads) if (th.typing && !messengerActive.has(th)) { th.typing = false; changed = true; }
+        for (const th of s.threads) if (th.pendingReply?.proactive && (!cfg().proactiveDMs || !hasStoryProgress())) { delete th.pendingReply; changed = true; }
+        if (!storyGenerating && !uniHubGenerating) {
+            for (const pd of [...(s.pendingDMs || [])]) if (now >= pd.at && startDM(s, pd)) { s.pendingDMs = s.pendingDMs.filter((x) => x !== pd); changed = true; }
+            for (const th of s.threads) if (th.pendingReply && dispatchMessengerReply(s, th, th.pendingReply, now)) changed = true;
+            if (initiatives && planInitiative(s, now)) changed = true;
+        }
+        if (changed) { save(s); if (ui.open && !isTyping()) render(); }
+        return changed;
+    }
+
+    async function reply(s, th, opts = {}) {
+        messengerActive.add(th);
+        th.typing = true; render();
+        try {
+            const hist = th.msgs.filter((m) => !m.sys).slice(-14).map((m) => `${m.me ? s.profile.name : (m.from || th.name)}: ${m.text}`).join('\n');
+            let extra = opts.availability ? `\n\n${opts.availability}` : '';
+            if (th.kind === 'char') {
+                const story = recentStory(Number(cfg().chatContext) || 0);
+                const lore = await loreFor(`${story}\n${hist}`);
+                const scene = currentScene();
+                extra += `\n\n${charCard()}${lore ? `\n\nЛор мира, связанный с разговором:\n${lore}` : ''}${story ? `\n\nПоследние события основной истории (${th.name} их помнит):\n${story}` : ''}${scene ? `\n\n=== ТЕКУЩИЙ МОМЕНТ ИСТОРИИ (самое важное) ===\n${scene}\n=== конец ===\nПереписка происходит ПРЯМО СЕЙЧАС, в этот самый момент истории. Строго соблюдай его: где находится ${th.name}, что делает, рядом ли ${s.profile.name}, время суток. Нельзя противоречить сцене — например, писать «я на патруле», если в сцене ${th.name} стоит у двери ${s.profile.name}. Если они сейчас рядом, ${th.name} может удивиться сообщению («я же прямо за дверью»), ответить вслух или написать с учётом этого.` : ''}`;
+            }
+            if (th.kind === 'dm') {
+                const sc = currentScene();
+                if (sc) extra += `\n\nТекущий момент основной истории: ${sc}`;
+            }
+            if (th.kind !== 'group') extra += `\n\nЭТО ЛИЧНАЯ ПЕРЕПИСКА только между ${th.name} и ${s.profile.name}: её никто больше не видит. Не обращайся в ней к третьим лицам («Майкл, скажи спасибо…», «@Келлер»), не пиши так, будто это комментарии или общий чат, — о других говори в третьем лице («скажу Майклу», «Майкл пусть спасибо скажет»). Комментарии в ленте — отдельное место.`;
+            if (th.kind !== 'group') extra += `\n\nПРАВИЛО ПРИСУТСТВИЯ: кто по текущей сцене находится рядом с ${s.profile.name} (в одном помещении, в одной машине, за одним столом), общается с ней/ним вслух. Никогда не проси ${s.profile.name} «передать», «сказать» или «попросить» того, кто сейчас рядом с ней/ним, — ты бы сказал(а) это сам(а) или написал(а) этому человеку напрямую. Если ты сам(а) — ${th.name} — сейчас рядом с ${s.profile.name}, ${opts.initiate ? 'ты не пишешь в мессенджер: верни reply пустой строкой ""' : 'ответь с учётом этого (удивись сообщению, скажи вслух или коротко напиши)'}.`;
+            const who = th.kind === 'group'
+                ? `участников учебной группы «${th.name}» (${th.bio}). Пиши от лица одного из участников в формате "Имя: текст".`
+                : th.kind === 'char'
+                    ? `${th.name} — персонажа текущей истории. Строго сохраняй его характер, отношение к ${s.profile.name}, манеру речи и словечки из карточки и примеров; учитывай события истории. Пиши так, как этот персонаж писал бы в мессенджере.`
+                    : `${th.name}${th.species ? ` (вид: ${th.species})` : ''}${th.bio ? `. О себе: ${th.bio}` : ''}`;
+            const relTxt = th.kind === 'group' ? '' : `\nОтношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100, шкала от −100 вражда до 100 близость).${th.relNote ? ` ${th.relNote}` : ''}${relLabel(th) === 'не знакомы' ? ` Они не знакомы — ${th.name} пишет как незнакомому человеку.` : ''}${th.kind === 'char' && s.profile.relWithChar ? ` ${th.name} и ${s.profile.name} — пара.` : ''}${jealousNote(s, th)}`;
+            if (S() !== s || (opts.valid && !opts.valid())) return { stale: true };
+            const raw = await aiRaw(`${world(s)}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist || '(переписки ещё не было)'}\n\n${opts.initiate ? `${opts.initiate}\n\n` : ''}Напиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date(NOW()).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(NOW())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
+            if (S() !== s || (opts.valid && !opts.valid())) return { stale: true };
+            const js = th.kind === 'group' ? null : parseJSON(raw);
+            let r = cleanReply(js && typeof js.reply === 'string' ? js.reply : raw).replace(/^["«]+|["»]+$/g, '');
+            const lastMine = [...th.msgs].reverse().find((m) => m.me);
+            if (js && !opts.initiate && th.kind !== 'group') updateRel(s, th, Number(js.delta) || 0, js.flirt === true || js.flirt === 'true', 8, lastMine ? `переписка в UniHub: ${s.profile.name} написал(а) «${lastMine.text.slice(0, 140)}»` : '');
+            if (!opts.initiate && js?.meet && typeof js.meet === 'object') detectMeet(s, th, js.meet);
+            if (r) {
+                let from;
+                if (th.kind === 'group') { const m = r.match(/^\s*[*_]{0,2}([^:*_\n]{2,30})[*_]{0,2}\s*:\s*[*_]{0,2}\s*/); if (m) { from = m[1].trim(); r = r.slice(m[0].length); } }
+                else r = r.replace(new RegExp(`^\\s*[*_]{0,2}${escRe(th.name)}[*_]{0,2}\\s*:?\\s*[*_]{0,2}\\s*`, 'i'), '');
+                r = r.replace(/^\s*(\*\*|__)[^*_\n]{1,60}(\*\*|__)\s*:?\s*\n+/, '').replace(/^\s*[A-Za-zА-Яа-яЁё][^:\n]{0,40}:\s*\n+/, '');
+                r = cleanMsg(r);
+                th.msgs.push({ me: false, from, text: r, t: Date.now(), initiative: !!opts.proactive });
+                th.t = Date.now();
+                if (!(ui.open && ui.view === 'thread' && ui.param === th.id)) { th.unread = (th.unread || 0) + 1; toast('info', `${th.name}: ${r.slice(0, 80)}`); notify(s, `💬 ${th.name}: ${r.slice(0, 70)}`, 'social', { view: 'thread', param: th.id }); }
+            } else if (!opts.initiate) th.msgs.push({ sys: true, text: 'Сообщение не доставлено: ИИ не ответил. Попробуйте ещё раз.', t: Date.now() });
+            save(s); render();
+            return { sent: !!r };
+        } finally { th.typing = false; messengerActive.delete(th); if (S() === s) render(); }
     }
 
     function cleanName(t) { return String(t || '').replace(/[*_`@]/g, '').trim().slice(0, 50); }
@@ -2630,8 +2775,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             th = s.threads.find((t) => t.name.toLowerCase() === pd.from.toLowerCase());
             if (!th) { th = { id: uid(), name: pd.from, species: pd.species, bio: '', kind: 'dm', msgs: [], t: Date.now(), unread: 0, rel: 10 }; s.threads.unshift(th); }
         }
-        if (th.typing) return false;
-        reply(s, th, { initiate: `${th.name} сам(а) пишет ${s.profile.name} первым(ой) в личку — продолжение разговора в комментариях ленты:\n${pd.context}\nЦель сообщения: ${pd.intent || 'продолжить разговор наедине'}. Если в комментариях договаривались встретиться — предложи или уточни конкретные день, время и место.` });
+        if (th.typing || th.pendingReply) return false;
+        queueMessengerReply(s, th, { initiate: `${th.name} сам(а) пишет ${s.profile.name} первым(ой) в личку — продолжение разговора в комментариях ленты:\n${pd.context}\nЦель сообщения: ${pd.intent || 'продолжить разговор наедине'}. Если в комментариях договаривались встретиться — предложи или уточни конкретные день, время и место.` });
         return true;
     }
     /** Реакция аудитории на пост пользователя: комментарии приходят постепенно, растут лайки и подписчики. */
@@ -2838,7 +2983,7 @@ ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species}
             th.t = Date.now();
             th.pendingMeet = null;
             save(s); render();
-            return reply(s, th);
+            return queueMessengerReply(s, th);
         },
         skipPending: (d, el, s) => {
             const th = s.threads.find((t) => t.id === d.id);
@@ -2879,7 +3024,7 @@ ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species}
                 updateRel(s, th, sameDay ? -5 : -2, false, 8, `${s.profile.name} отменил(а) встречу${sameDay ? ' в последний момент' : ''}`);
                 th.msgs.push({ me: true, text: `❌ Прости, не получится ${fmtWhen(m.at)} — отменяю встречу.`, t: NOW() });
                 save(s); render();
-                return reply(s, th);
+                return queueMessengerReply(s, th);
             }
             save(s); render();
         },
@@ -3048,7 +3193,7 @@ ${ctx().name2 && !ctx().groupId ? `Ровно 1 пост из 6 — от ${ctx()
             byId('sh-msg').value = '';
             questEvent(s, 'dm', 1, '', `${th.name}: ${text}`);
             save(s);
-            return reply(s, th);
+            return queueMessengerReply(s, th);
         },
 
         /* знакомства */
@@ -3534,8 +3679,8 @@ ${story ? `Последние события истории:\n${story}\nЕсли
         if (menu) {
             const it = document.createElement('div');
             it.className = 'list-group-item flex-container flexGap5 interactable';
-            it.tabIndex = 0;
-            it.innerHTML = '<div class="fa-solid fa-graduation-cap extensionsMenuExtensionButton"></div>UniHub';
+            it.tabIndex = 0; it.id = 'unihub-menu';
+            it.innerHTML = '<div class="fa-solid fa-graduation-cap extensionsMenuExtensionButton"></div>UniHub <span id="unihub-menu-badge" aria-label="Непрочитанные сообщения" style="display:none"></span>';
             it.addEventListener('click', () => toggle(true));
             menu.appendChild(it);
         }
@@ -3637,6 +3782,7 @@ ${story ? `Последние события истории:\n${story}\nЕсли
         bindStoryEvents(eventSource, event_types);
         // Horae обновляет свои метаданные асинхронно и при ручных правках без события чата.
         setInterval(pollHoraeClock, 1500);
+        setInterval(() => { try { tickMessenger(); } catch (e) { logErr('Мессенджер', e); } }, 5000);
         setInterval(() => {
             try { tick(); } catch (e) { logErr('Таймер', e); }
             updateInjection();

@@ -468,3 +468,9 @@
 #unihub-phone .sh-mediain { flex-wrap: nowrap !important; margin: 6px 0; }
 #unihub-phone .sh-mediain select { flex: 0 0 auto; width: auto; max-width: 42%; }
 #unihub-phone .sh-mediain input { flex: 1; min-width: 0; }
+
+/* Статус доступности в мессенджере и рядом с именами. */
+#unihub-phone .sh-presence { display: inline-block; width: 9px; height: 9px; margin-left: 4px; border-radius: 50%; vertical-align: middle; flex-shrink: 0; box-shadow: 0 0 0 1px var(--sh-card); }
+#unihub-phone .sh-presence.online { background: var(--sh-ok); }
+#unihub-phone .sh-presence.offline { background: var(--sh-mute); opacity: .65; }
+#unihub-menu-badge { display: inline-block; min-width: 18px; padding: 1px 5px; border-radius: 10px; background: #a96082; color: white; font-size: 11px; text-align: center; }

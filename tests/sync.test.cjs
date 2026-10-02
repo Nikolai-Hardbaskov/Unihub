@@ -1,0 +1,599 @@
+const fs = require('node:fs');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const { test } = require('node:test');
+const source = fs.readFileSync(__dirname + '/../index.js', 'utf8');
+const MIN = 60000;
+const BASE = new Date(2026, 0, 5, 10).getTime();
+const defer = () => { let resolve; const promise = new Promise(r => resolve = r); return { promise, resolve }; };
+function app() {
+    const timers = new Map(), events = new Map(), calls = [], prompts = [], elements = {};
+    let wallNow = Date.now(), random = () => Math.random();
+    const fakeMath = Object.create(Math); fakeMath.random = () => random();
+    class FakeDate extends Date { constructor(...args) { super(...(args.length ? args : [wallNow])); } static now() { return wallNow; } }
+    let nextTimer = 1, answer = async prompt => prompt.includes('Часы истории перед')
+        ? { minutes: 10 } : { known: true, rel: 60, status: 'друзья', pair: false };
+    const context = {
+        characterId: 0, chatId: 'a', chatMetadata: {}, extensionSettings: {},
+        name1: 'Студент', name2: 'Алекс', characters: [{ description: 'Студент Алекс' }],
+        chat: [{ name: 'Алекс', mes: 'Привет!', send_date: 'first' }],
+        eventSource: { on: (name, handler) => events.set(name, handler) },
+        setExtensionPrompt: (id, prompt) => { if (id === 'unihub') prompts.push(prompt); },
+        generateRaw: async ({ prompt }) => { calls.push(prompt); return JSON.stringify(await answer(prompt)); },
+    };
+    const box = {
+        SillyTavern: { getContext: () => context }, Date: FakeDate, Math: fakeMath,
+        window: { addEventListener() {} }, document: { getElementById: id => elements[id] || null, querySelector: () => null }, navigator: {}, console,
+        jQuery() {},
+        setTimeout: (fn, ms) => { const id = nextTimer++; timers.set(id, { fn, ms }); return id; },
+        clearTimeout: id => timers.delete(id),
+    };
+    const exposed = `
+    render = () => {}; tick = () => {}; notify = () => {};
+    globalThis.testApi = { cfg, S, save, syncRel, needsRelSync, storySyncKey, storySyncState,
+        scheduleStorySync, flushStorySync, onStoryReply, buildInjection, bindStoryEvents,
+        setClock, aiRaw, onChatChanged, readHorae, parseStoryTime, syncHoraeClock, pollHoraeClock,
+        readChatClock, guessedStoryClock, hasStoryProgress, refreshQuests, makeQuest, questEvent, fireHook, stripMention, commentHTML, aiComments, ACT, ui, questHTML, questScopeReady, drainQueue: () => queue,
+        queueMessengerReply, tickMessenger, presenceFor, applyPresence, planInitiative, presenceDot, chatsTab, threadView, messengerState, startDM,
+        setGenerating: value => { storyGenerating = value; }, getGenerating: () => storyGenerating };
+    `;
+    vm.runInNewContext(source.replace('    globalThis.UniHub =', exposed + '\n    globalThis.UniHub ='), box);
+    const api = box.testApi;
+    const s = api.S(); s.auth = true; s.clock = { mode: 'game', t: BASE };
+    s.campusLoreAt = s.genClubsAt = s.lorePeopleAt = 1;
+    const th = { id: 'char', kind: 'char', name: 'Алекс', bio: '', msgs: [], rel: 0 };
+    s.threads.push(th);
+    api.cfg().syncHorae = false;
+    api.storySyncState(s);
+    const names = ['CHAT_CHANGED', 'CHAT_LOADED', 'MESSAGE_RECEIVED', 'GENERATION_STARTED', 'GENERATION_ENDED', 'GENERATION_STOPPED', 'MESSAGE_EDITED', 'MESSAGE_UPDATED', 'MESSAGE_SWIPED', 'MESSAGE_SWIPE_DELETED', 'MESSAGE_DELETED', 'CHARACTER_MESSAGE_RENDERED', 'MESSAGE_SENT', 'USER_MESSAGE_RENDERED', 'MORE_MESSAGES_LOADED', 'CHARACTER_EDITED'];
+    api.bindStoryEvents(context.eventSource, Object.fromEntries(names.map(n => [n, n])));
+    return { context, api, s, th, calls, prompts, timers, elements, window: box.window,
+        answer: fn => { answer = fn; }, setRandom: value => { random = typeof value === 'function' ? value : () => value; }, setWall: value => { wallNow = value; }, wall: () => wallNow, emit: (name, ...args) => events.get(name)?.(...args),
+        flush: () => api.flushStorySync(api.S()),
+        add: (mes, is_user = false) => { context.chat.push({ name: is_user ? 'Студент' : 'Алекс', mes, is_user, send_date: 'm' + context.chat.length }); return context.chat.length - 1; },
+    };
+}
+test('closed phone: relationships follow new messages, same-length edits, swipes, deletion', async () => {
+    const a = app(); a.api.cfg().syncAI = false;
+    let rel = 20; a.answer(async () => ({ known: true, rel, status: 'приятели' }));
+    a.api.scheduleStorySync(); await a.flush(); assert.equal(a.th.rel, 20);
+    let id = a.add('Мы друзья.'); await a.emit('MESSAGE_RECEIVED', id); await a.flush();
+    rel = 70; a.context.chat[id].mes = 'Мы встречаемся.';
+    await a.emit('MESSAGE_EDITED', id); await a.flush(); assert.equal(a.th.rel, 70);
+    rel = -30; a.context.chat[id].swipe_id = 1; a.context.chat[id].mes = 'Мы поссорились.';
+    await a.emit('MESSAGE_SWIPED', id); await a.flush(); assert.equal(a.th.rel, -30);
+    a.context.chat.splice(id, 1); rel = 10;
+    await a.emit('MESSAGE_DELETED'); await a.flush(); assert.equal(a.th.rel, 10);
+    const n = a.calls.length; a.api.scheduleStorySync(); await a.flush(); assert.equal(a.calls.length, n);
+});
+test('duplicate reply events count delivery once and edited clock uses original base', async () => {
+    const a = app(); let minutes = 10;
+    a.answer(async p => p.includes('Часы истории перед') ? { minutes } : { rel: 30 });
+    a.s.orders.push({ kind: 'food', stage: 'preparing', injected: true, title: 'Еда' });
+    const id = a.add('Через десять минут.');
+    a.emit('MESSAGE_RECEIVED', id); a.emit('MESSAGE_RECEIVED', id); a.emit('CHARACTER_MESSAGE_RENDERED', id);
+    await a.flush(); assert.equal(a.s.replyCount, 1); assert.equal(a.s.orders[0].stage, 'delivered');
+    assert.equal(a.s.clock.t, BASE + 10 * MIN);
+    a.emit('GENERATION_ENDED'); await a.flush(); assert.equal(a.s.clock.t, BASE + 10 * MIN);
+    minutes = 20; a.context.chat[id].mes = 'Через двадцать минут.';
+    a.emit('MESSAGE_EDITED', id); await a.flush(); assert.equal(a.s.clock.t, BASE + 20 * MIN);
+    minutes = 5; a.context.chat[id].mes = 'Через пять минут.';
+    a.emit('MESSAGE_SWIPED', id); await a.flush(); assert.equal(a.s.clock.t, BASE + 20 * MIN);
+});
+test('new reply arriving during time sync gets processed and stale result is discarded', async () => {
+    const a = app(), d = defer(); let clockCalls = 0;
+    a.answer(async p => p.includes('Часы истории перед') ? (++clockCalls === 1 ? d.promise : { minutes: 7 }) : { rel: 40 });
+    a.emit('MESSAGE_RECEIVED', a.add('Старый ответ.')); const running = a.flush();
+    a.emit('MESSAGE_RECEIVED', a.add('Новый ответ.')); d.resolve({ minutes: 100 }); await running;
+    assert.equal(a.s.clock.t, BASE + 7 * MIN); assert.equal(clockCalls, 2); assert.equal(a.s.replyCount, 2);
+});
+test('switching chats cannot apply an old relationship or time result', async () => {
+    const a = app(), d = defer(); a.answer(async () => d.promise);
+    a.emit('MESSAGE_RECEIVED', a.add('Потом прошёл час.')); const running = a.flush();
+    a.context.chatMetadata = {}; a.context.chatId = 'b'; a.context.chat = [{ name: 'Алекс', mes: 'Другой чат' }];
+    const b = a.api.S(); b.auth = true; b.clock.t = BASE; d.resolve({ minutes: 90, rel: 90 }); await running;
+    assert.equal(a.s.clock.t, BASE); assert.equal(b.clock.t, BASE); assert.equal(a.th.rel, 0);
+});
+test('manual clock changes and real-time mode survive pending AI result', async () => {
+    for (const real of [false, true]) {
+        const a = app(), d = defer(); a.answer(async p => p.includes('Часы истории перед') ? d.promise : { rel: 0 });
+        a.emit('MESSAGE_RECEIVED', a.add('Ещё одна реплика.')); const running = a.flush();
+        if (real) a.s.clock.mode = 'real'; else a.api.setClock(a.s, BASE + 60 * MIN, 'вручную');
+        d.resolve({ minutes: 120 }); await running;
+        assert.equal(a.s.clock.t, real ? BASE : BASE + 60 * MIN);
+        assert.equal(a.s.clock.mode, real ? 'real' : 'game');
+    }
+});
+test('disabled time AI and zero-minute step make no time AI calls', async () => {
+    const a = app(); a.api.cfg().syncAI = false; a.api.cfg().stepMin = 0;
+    a.emit('MESSAGE_RECEIVED', a.add('Время не меняется.')); await a.flush();
+    assert.equal(a.s.clock.t, BASE); assert.equal(a.calls.some(p => p.includes('Часы истории перед')), false);
+});
+test('quiet UniHub generation does not start a story-generation recursion', async () => {
+    const a = app(); delete a.context.generateRaw;
+    a.context.generateQuietPrompt = async function (quietPrompt) {
+        await a.emit('GENERATION_STARTED', 'quiet', {}, false); await a.emit('GENERATION_ENDED');
+        return '{"rel":45,"status":"друзья"}';
+    };
+    a.api.scheduleStorySync(); await a.flush(); assert.equal(a.th.rel, 45); assert.equal(a.api.getGenerating(), false);
+    await a.emit('GENERATION_STARTED', 'quiet', {}, false); assert.equal(a.api.getGenerating(), false);
+});
+test('main generation waits for in-flight sync then gets refreshed prompt', async () => {
+    const a = app(), d = defer(); a.answer(async () => d.promise);
+    a.add('Продолжим выбранную историю.', true);
+    a.api.scheduleStorySync(); const running = a.flush();
+    let started = false;
+    const starting = a.emit('GENERATION_STARTED', 'normal', {}, false).then(() => { started = true; });
+    await Promise.resolve(); assert.equal(started, false);
+    d.resolve({ known: true, rel: 70, status: 'друзья' }); await running; await starting;
+    assert.equal(a.api.getGenerating(), true); assert.match(a.prompts.at(-1), /друзья/);
+    a.emit('GENERATION_ENDED'); await a.flush(); assert.equal(a.api.getGenerating(), false);
+});
+test('chat loading does not advance an existing answer again', async () => {
+    const a = app(); a.emit('CHAT_CHANGED'); await a.flush(); assert.equal(a.s.clock.t, BASE);
+    a.emit('CHAT_LOADED'); await a.flush(); assert.equal(a.s.clock.t, BASE);
+});
+test('old DM excerpts persist with bounded length and narrator-only privacy rules', () => {
+    const a = app(), old = Date.now() - 5 * 86400000;
+    a.th.msgs = [{ text: 'Старый разговор', me: true, t: old }];
+    a.s.threads.push({ kind: 'dm', name: 'Ирина', t: old, msgs: [{ text: 'Секрет Ирины', t: old, me: false }] });
+    const prompt = a.api.buildInjection(); assert.match(prompt, /Старый разговор/); assert.match(prompt, /Секрет Ирины/);
+    assert.match(prompt, /Только для рассказчика/); assert.match(prompt, /не знает их содержания/);
+    a.api.cfg().shareDMs = false; const noDM = a.api.buildInjection();
+    assert.doesNotMatch(noDM, /Старый разговор|Секрет Ирины/);
+    a.api.cfg().inject = false; assert.equal(a.api.buildInjection(), '');
+});
+test('swipe timestamps change without counting elapsed time from a new base', async () => {
+    const a = app(); a.api.cfg().syncAI = false;
+    const id = a.add('Первый вариант'); a.emit('MESSAGE_RECEIVED', id); await a.flush();
+    a.context.chat[id].send_date = 'changed-swipe-date'; a.context.chat[id].swipe_id = 1;
+    a.context.chat[id].mes = 'Другой вариант'; a.emit('MESSAGE_SWIPED', id); await a.flush();
+    assert.equal(a.s.clock.t, BASE + 10 * MIN);
+});
+test('deletion does not advance the prior historical answer', async () => {
+    const a = app(); a.api.cfg().syncAI = false;
+    const id = a.add('Последний ответ'); a.emit('MESSAGE_RECEIVED', id); await a.flush();
+    a.context.chat.pop(); a.emit('MESSAGE_DELETED'); await a.flush();
+    a.emit('GENERATION_ENDED'); await a.flush(); assert.equal(a.s.clock.t, BASE + 10 * MIN);
+});
+test('regeneration replacing the message keeps its original time base and reply count', async () => {
+    const a = app(); a.api.cfg().syncAI = false;
+    let id = a.add('Первый ответ'); a.emit('MESSAGE_RECEIVED', id); await a.flush();
+    await a.emit('GENERATION_STARTED', 'regenerate', {}, false);
+    a.context.chat.pop(); a.emit('MESSAGE_DELETED');
+    id = a.add('Перегенерированный ответ'); a.context.chat[id].send_date = 'new-generated-date';
+    a.emit('MESSAGE_RECEIVED', id); a.emit('GENERATION_ENDED'); await a.flush();
+    assert.equal(a.s.clock.t, BASE + 10 * MIN); assert.equal(a.s.replyCount, 1);
+});
+test('Horae separate date/time fields preserve the story date', () => {
+    const a = app(); a.context.chat[0].horae_meta = {
+        timestamp: { story_date: '2025-09-01', story_time: '14:30', absolute: '2026-10-02T08:54:00Z' }
+    };
+    assert.equal(a.api.readHorae(), new Date(2025, 8, 1, 14, 30).getTime());
+});
+test('Horae API aligns an older story date on opening a chat', async () => {
+    const a = app(); a.api.cfg().syncHorae = true;
+    a.window.Horae = { isEnabled: () => true, getLatestState: () => ({ timestamp: { story_date: '2025-09-01', story_time: '14:30' } }) };
+    a.emit('CHAT_CHANGED'); await a.flush();
+    assert.equal(a.s.clock.t, new Date(2025, 8, 1, 14, 30).getTime());
+});
+test('date-only metadata cannot be misread as a dotted clock time', () => {
+    const a = app(); a.context.chat[0].horae_meta = { timestamp: { story_date: '01.09.2025', absolute: '2026-10-02T08:54:00Z' } };
+    assert.equal(a.api.readHorae(), null);
+});
+test('background raw UniHub request cannot swallow main generation end', async () => {
+    const a = app(), d = defer(); await a.emit('GENERATION_STARTED', 'normal', {}, false);
+    a.answer(async () => d.promise); const background = a.api.aiRaw('Фоновый запрос');
+    a.emit('GENERATION_ENDED'); assert.equal(a.api.getGenerating(), false);
+    d.resolve({ rel: 0 }); await background;
+});
+test('Horae changes after the chat event and manual edits are detected without new text', () => {
+    const a = app(); a.api.cfg().syncHorae = true;
+    let time = '14:30';
+    a.window.Horae = { getLatestState: () => ({ timestamp: { story_date: '2025-09-01', story_time: time } }) };
+    a.api.pollHoraeClock(); assert.equal(a.s.clock.t, new Date(2025, 8, 1, 14, 30).getTime());
+    time = '16:15'; a.api.pollHoraeClock(); assert.equal(a.s.clock.t, new Date(2025, 8, 1, 16, 15).getTime());
+    time = '09:10'; a.api.pollHoraeClock(); assert.equal(a.s.clock.t, new Date(2025, 8, 1, 9, 10).getTime());
+    assert.equal(a.calls.length, 0);
+});
+test('Horae carries an older date anchor across messages without mistaking absolute for story time', () => {
+    const a = app();
+    a.context.chat[0].horae_meta = { timestamp: { story_date: '2025-09-01', story_time: '10:00' } };
+    for (let i = 0; i < 5; i++) a.add('Продолжаем.');
+    a.context.chat.at(-1).horae_meta = { timestamp: { story_time: '23:45', absolute: '2026-10-02T08:00:00Z' } };
+    assert.equal(a.api.readHorae(), new Date(2025, 8, 1, 23, 45).getTime());
+});
+test('Horae settings, real mode, and manual time overrides remain effective', () => {
+    const a = app(); let enabled = true;
+    a.window.Horae = { isEnabled: () => enabled, getLatestState: () => ({ timestamp: { story_date: '2025-09-01', story_time: '14:30' } }) };
+    a.api.pollHoraeClock(); assert.equal(a.s.clock.t, BASE); // UniHub syncHorae is off.
+    a.api.cfg().syncHorae = true; a.s.clock.mode = 'real'; a.api.pollHoraeClock(); assert.equal(a.s.clock.t, BASE);
+    a.s.clock.mode = 'game'; enabled = false; a.api.pollHoraeClock(); assert.equal(a.s.clock.t, BASE);
+    enabled = true; a.api.pollHoraeClock();
+    const manual = a.s.clock.t + 60 * MIN; a.api.setClock(a.s, manual, 'вручную');
+    a.api.pollHoraeClock(); assert.equal(a.s.clock.t, manual);
+});
+test('Horae raw tags and legacy metadata pair dates with times', () => {
+    const a = app(); a.context.chat[0].mes = 'История<horae>time:01.09.2025 14:30\nlocation:кампус</horae>';
+    assert.equal(a.api.readHorae(), new Date(2025, 8, 1, 14, 30).getTime());
+    a.context.chat[0].mes = 'История'; a.context.chatMetadata.horae = { date: '2025/09/02', time: '00:15' };
+    assert.equal(a.api.readHorae(), new Date(2025, 8, 2, 0, 15).getTime());
+});
+test('main chat explicit date and earlier clock time align exactly without an invented day', async () => {
+    const a = app();
+    a.answer(async p => p.includes('Часы истории перед') ? { date: '2025-09-01', time: '09:00', minutes: 0 } : { rel: 0 });
+    a.emit('MESSAGE_RECEIVED', a.add('Сейчас 1 сентября 2025 года, 09:00.')); await a.flush();
+    assert.equal(a.s.clock.t, new Date(2025, 8, 1, 9).getTime());
+    a.answer(async p => p.includes('Часы истории перед') ? { time: '08:30', minutes: 0 } : { rel: 0 });
+    a.emit('MESSAGE_RECEIVED', a.add('Уточнение: сейчас 08:30.')); await a.flush();
+    assert.equal(a.s.clock.t, new Date(2025, 8, 1, 8, 30).getTime());
+});
+test('Horae Russian calendar dates and invalid date input are handled consistently', () => {
+    const a = app();
+    a.context.chat[0].horae_meta = { timestamp: { story_date: '1 сентября 2025 года', story_time: '09:30' } };
+    assert.equal(a.api.readHorae(), new Date(2025, 8, 1, 9, 30).getTime());
+    assert.equal(a.api.parseStoryTime('2025-02-30 09:30', BASE), null);
+    assert.equal(a.api.parseStoryTime('2025-09-01 25:00', BASE), null);
+});
+test('Horae polling resumes when available and cannot touch another chat or an active story generation', async () => {
+    const a = app(); a.api.cfg().syncHorae = true; a.api.pollHoraeClock(); assert.equal(a.s.clock.t, BASE);
+    a.window.Horae = { getLatestState: () => ({ timestamp: { story_date: '2025-09-01', story_time: '09:00' } }) };
+    await a.emit('GENERATION_STARTED', 'normal', {}, false);
+    const before = a.s.clock.t;
+    a.window.Horae.getLatestState = () => ({ timestamp: { story_date: '2025-09-01', story_time: '10:00' } });
+    a.api.pollHoraeClock(); assert.equal(a.s.clock.t, before);
+    a.emit('GENERATION_ENDED'); a.api.pollHoraeClock(); assert.equal(a.s.clock.t, new Date(2025, 8, 1, 10).getTime());
+    a.context.chatMetadata = {}; a.context.chatId = 'b'; const b = a.api.S(); b.auth = true; b.clock.t = BASE;
+    assert.equal(a.api.syncHoraeClock(a.s), null); assert.equal(b.clock.t, BASE);
+});
+test('without Horae, explicit scene time is read without asking the model', async () => {
+    const a = app(); a.api.cfg().syncHorae = true; a.api.cfg().syncAI = false;
+    a.emit('MESSAGE_RECEIVED', a.add('Сейчас 1 сентября 2025 года, 18:20. Мы в библиотеке.')); await a.flush();
+    assert.equal(a.s.clock.t, new Date(2025, 8, 1, 18, 20).getTime());
+    assert.equal(a.s.clock.source, 'время из чата');
+    assert.equal(a.calls.some(p => p.includes('Часы истории перед')), false);
+});
+test('Horae stays ahead of a contradictory timestamp in the chat', async () => {
+    const a = app(); a.api.cfg().syncHorae = true;
+    a.window.Horae = { getLatestState: () => ({ timestamp: { story_date: '2025-09-01', story_time: '14:30' } }) };
+    a.emit('MESSAGE_RECEIVED', a.add('Сейчас 2025-09-01 18:20.')); await a.flush();
+    assert.equal(a.s.clock.t, new Date(2025, 8, 1, 14, 30).getTime());
+    assert.equal(a.s.clock.source, 'Horae');
+});
+test('time AI sees user context and chooses a plausible time for a scene without exact clocks', async () => {
+    const a = app(); a.add('На город опускается вечер.', true);
+    a.answer(async p => p.includes('Часы истории перед') ? { time: '18:30', inferred: true } : { rel: 0 });
+    a.emit('MESSAGE_RECEIVED', a.add('Они сидят у окна и смотрят на закат.')); await a.flush();
+    assert.equal(a.s.clock.t, new Date(2026, 0, 5, 18, 30).getTime());
+    assert.equal(a.s.clock.source, 'ИИ: выбранное время');
+    assert.ok(a.calls.find(p => p.includes('Часы истории перед')).includes('На город опускается вечер.'));
+});
+test('invalid time JSON falls back to a chosen step instead of freezing the clock', async () => {
+    const a = app(); a.answer(async () => ({ irrelevant: true }));
+    a.emit('MESSAGE_RECEIVED', a.add('Они разговаривают.')); await a.flush();
+    assert.equal(a.s.clock.t, BASE + 10 * MIN); assert.equal(a.s.clock.source, 'UniHub: выбранное время');
+});
+test('without a model, textual relative time beats the fallback step', async () => {
+    const a = app(); a.api.cfg().syncAI = false;
+    a.emit('MESSAGE_RECEIVED', a.add('Спустя полчаса они вышли из библиотеки.')); await a.flush();
+    assert.equal(a.s.clock.t, BASE + 30 * MIN);
+});
+test('a new story without any time hints starts at 09:00 only once', async () => {
+    const a = app(); a.s.clock.source = 'старт'; a.api.cfg().syncAI = false;
+    a.emit('CHAT_CHANGED'); await a.flush(); assert.equal(a.s.clock.t, new Date(2026, 0, 5, 9).getTime());
+    assert.equal(a.s.clock.storyInitialized, true);
+    a.emit('CHAT_LOADED'); await a.flush(); assert.equal(a.s.clock.t, new Date(2026, 0, 5, 9).getTime());
+});
+test('first entry reads an existing story timestamp rather than adding a step to it', async () => {
+    const a = app(); a.s.clock.source = 'старт'; a.api.cfg().syncAI = false;
+    a.context.chat[0].mes = 'На часах 15:40.';
+    a.emit('CHAT_CHANGED'); await a.flush(); assert.equal(a.s.clock.t, new Date(2026, 0, 5, 15, 40).getTime());
+    a.emit('CHAT_LOADED'); await a.flush(); assert.equal(a.s.clock.t, new Date(2026, 0, 5, 15, 40).getTime());
+});
+test('a user-only new story can receive a model-chosen initial time', async () => {
+    const a = app(); a.context.chat = [{ name: 'Студент', is_user: true, mes: 'Мы пришли в столовую на обед.' }];
+    a.s.clock.source = 'старт'; a.answer(async () => ({ time: '13:00', inferred: true }));
+    a.emit('CHAT_CHANGED'); await a.flush(); assert.equal(a.s.clock.t, new Date(2026, 0, 5, 13).getTime());
+});
+test('an empty story receives an initial clock without requiring a model request', async () => {
+    const a = app(); a.context.chat = []; a.s.clock.source = 'старт'; a.s.threads = [];
+    a.emit('CHAT_CHANGED'); await a.flush(); assert.equal(a.s.clock.t, new Date(2026, 0, 5, 9).getTime());
+    assert.equal(a.calls.length, 0);
+});
+test('planned meeting timestamps are not interpreted as present story time', async () => {
+    const a = app(); a.api.cfg().syncAI = false;
+    a.emit('MESSAGE_RECEIVED', a.add('Сейчас мы договоримся: завтра встретимся в 18:30.')); await a.flush();
+    assert.equal(a.s.clock.t, BASE + 10 * MIN);
+});
+test('March and May dates keep their distinct calendar months', () => {
+    const a = app();
+    assert.equal(a.api.parseStoryTime('1 марта 2025 14:30', BASE), new Date(2025, 2, 1, 14, 30).getTime());
+    assert.equal(a.api.parseStoryTime('1 мая 2025 14:30', BASE), new Date(2025, 4, 1, 14, 30).getTime());
+});
+test('initialization cannot add elapsed minutes to an already existing response', async () => {
+    const a = app(); a.s.clock.source = 'старт';
+    a.answer(async p => p.includes('Часы истории перед') ? { minutes: 10 } : { rel: 0 });
+    a.emit('CHAT_CHANGED'); await a.flush(); assert.equal(a.s.clock.t, new Date(2026, 0, 5, 9).getTime());
+});
+test('offline initial time follows the latest day-part clue in user and character context', async () => {
+    const a = app(); a.s.clock.source = 'старт'; a.api.cfg().syncAI = false;
+    a.context.chat = [{ is_user: true, mes: 'Было утро, но теперь сейчас вечер.' }, { is_user: false, mes: 'Они смотрят в окно.' }];
+    a.emit('CHAT_CHANGED'); await a.flush(); assert.equal(a.s.clock.t, new Date(2026, 0, 5, 18).getTime());
+});
+test('model unavailability still leaves working fallback clocks', async () => {
+    const a = app(); delete a.context.generateRaw;
+    a.s.threads = []; // No other model requests in this scenario.
+    a.emit('MESSAGE_RECEIVED', a.add('Они разговаривают.')); await a.flush();
+    assert.equal(a.s.clock.t, BASE + 10 * MIN);
+});
+test('an empty chat cannot receive a predefined UniHub opening plot', () => {
+    const a = app(); a.context.chat = [];
+    a.s.social.quests = [{ k: 'rp', t: 'Подвал', desc: 'Найди книгу в подвале', setup: 'Алекс зовёт студента в подвал', done: false }];
+    a.s.notes = [{ type: 'important', text: 'Алекс уже встретил студента в подвале', t: Date.now() }];
+    const prompt = a.api.buildInjection();
+    assert.doesNotMatch(prompt, /подвал|Задания дня|Предстоящие события|Недавние события/);
+    assert.match(prompt, /Студент/);
+});
+test('rerolling the only assistant opening does not inject its derived relationship and clock', async () => {
+    const a = app(); a.context.characters[0].first_mes = '';
+    a.context.chat[0].mes = 'Алекс спас студента из подвала.';
+    a.th.status = 'друзья'; a.th.relNote = 'спас студента из подвала';
+    a.s.clock.source = 'ИИ по чату';
+    await a.emit('GENERATION_STARTED', 'swipe', {}, false);
+    assert.doesNotMatch(a.prompts.at(-1), /подвал|Отношения|Время истории \(часы UniHub\)/);
+});
+test('daily plot quests wait for the user to accept an opening by replying to it', async () => {
+    const a = app(); a.context.chat = [];
+    assert.equal(a.api.refreshQuests(a.s), false); assert.equal(a.calls.length, 0);
+    a.add('Напиши вступление.', true); assert.equal(a.api.refreshQuests(a.s), false);
+    a.add('Алекс сидит в библиотеке.'); assert.equal(a.api.refreshQuests(a.s), false);
+    a.context.chat.at(-1).mes = 'Другой вариант: Алекс гуляет в парке.';
+    assert.equal(a.api.refreshQuests(a.s), false); assert.equal(a.calls.length, 0);
+    a.add('Я подхожу к Алексу.', true);
+    a.answer(async () => [{ k: 'rp', title: 'Парк', desc: 'Помоги в парке', n: 1 }, { k: 'like', title: 'Лайки', n: 2 }, { k: 'post', title: 'Пост', n: 1 }]);
+    assert.equal(a.api.refreshQuests(a.s), true); await a.api.drainQueue();
+    assert.equal(a.s.social.quests.length, 3); assert.equal(a.s.social.quests[0].t, 'Парк');
+    assert.match(a.calls[0], /гуляет в парке/); assert.doesNotMatch(a.calls[0], /сидит в библиотеке/);
+    assert.match(a.api.buildInjection(), /Задания дня|Время истории \(часы UniHub\)/);
+});
+test('regenerate and deletion events keep the opening prompt free of old plot hooks', async () => {
+    const a = app(); a.s.social.quests = [{ k: 'rp', t: 'Подвал', desc: 'Старый сюжет в подвале', done: false }];
+    await a.emit('GENERATION_STARTED', 'regenerate', {}, false); assert.doesNotMatch(a.prompts.at(-1), /подвал/);
+    a.context.chat.pop(); a.emit('MESSAGE_DELETED'); assert.doesNotMatch(a.prompts.at(-1), /подвал/);
+    const id = a.add('Новый вариант в парке.'); a.emit('MESSAGE_RECEIVED', id); a.emit('GENERATION_ENDED');
+    assert.doesNotMatch(a.prompts.at(-1), /подвал|Задания дня/);
+    assert.equal(a.api.hasStoryProgress(), false);
+});
+test('empty placeholders and opening requests do not count as an accepted story', () => {
+    const a = app(); a.context.chat = [{ is_system: true, mes: 'Пустое вступление' }, { is_user: false, mes: ' ' }, { is_user: true, mes: 'Начни историю.' }];
+    assert.equal(a.api.hasStoryProgress(), false);
+    a.add('Настоящее вступление.'); assert.equal(a.api.hasStoryProgress(), false);
+    a.add('Мой ответ персонажу.', true); assert.equal(a.api.hasStoryProgress(), true);
+});
+test('manual phone actions still reach the model while the opening is being selected', () => {
+    const a = app(); a.context.chat = [];
+    a.th.msgs.push({ me: true, text: 'Я заказал кофе.', t: Date.now() });
+    a.s.orders.push({ kind: 'food', title: 'Кофе', dueReply: 1, stage: 'cooking' });
+    const prompt = a.api.buildInjection(); assert.match(prompt, /Я заказал кофе/); assert.match(prompt, /ДОСТАВКА/);
+    assert.doesNotMatch(prompt, /Задания дня|Время истории \(часы UniHub\)/);
+});
+test('quests derived from a changed story cannot be committed after the AI request finishes', async () => {
+    const a = app(), d = defer(); a.add('Я отвечаю на вступление.', true);
+    a.answer(async () => d.promise); assert.equal(a.api.refreshQuests(a.s), true);
+    await Promise.resolve(); await Promise.resolve();
+    a.context.chat = []; d.resolve([{ k: 'rp', title: 'Устаревшее', desc: 'Старый сюжет', n: 1 }]);
+    await a.api.drainQueue(); assert.equal(a.s.social.quests.length, 0); assert.equal(a.s.social.questDay, '');
+});
+function feedQuests(a, k = 'comment') {
+    a.s.feed.push({ id: 'sale', author: 'Рита Филлипс', story: 'Распродажа у Кендо', text: 'Скидки у Кендо', comments: [] },
+        { id: 'bikes', author: 'Клэр Редфилд', story: 'Мотопробег к озеру', text: 'Кто со мной?', comments: [] });
+    const q = a.api.makeQuest({ k, title: 'Огненные скидки', desc: 'В теме Кендо', targetPostId: 'sale', n: 2,
+        trigger: k, hook: { type: 'dm', from: 'Роберт Кендо', intent: 'Предложит скидку' } }, a.s);
+    a.s.social.quests = [q]; return q;
+}
+test('Kendo comment quest and its DM hook ignore the motorcycle thread', () => {
+    const a = app(), q = feedQuests(a);
+    for (let i = 0; i < 2; i++) a.api.questEvent(a.s, 'comment', 1, '', 'Я!', { postId: 'bikes' });
+    assert.equal(q.p, 0); assert.equal(q.done, false); assert.equal(q.hookAt, undefined);
+    a.api.questEvent(a.s, 'comment', 1, '', 'Вопрос о скидке', { postId: 'sale' });
+    assert.equal(q.p, 1); assert.ok(q.hookAt); assert.equal(q.hookPostId, 'sale');
+    a.api.questEvent(a.s, 'comment', 1, '', 'Спасибо', { postId: 'sale' });
+    assert.equal(q.p, 2); assert.equal(q.done, true);
+});
+test('reply action uses captured post and records comment before waiting for AI', async () => {
+    const a = app(), q = feedQuests(a), d = defer();
+    a.elements['sh-cmt'] = { value: 'Я! 🖐' }; a.api.ui.replyTo = 'Клэр Редфилд'; a.answer(() => d.promise);
+    const run = a.api.ACT.comment({ id: 'bikes' }, null, a.s);
+    assert.equal(a.s.feed[1].comments.length, 1); assert.equal(q.p, 0); assert.equal(q.hookAt, undefined);
+    a.api.ui.param = 'sale'; d.resolve({ comments: [], followup: null }); await run;
+    assert.equal(q.p, 0); assert.equal(q.hookAt, undefined);
+    const generic = a.api.makeQuest({ k: 'comment', n: 2 }, a.s); a.s.social.quests.push(generic);
+    a.elements['sh-cmt'].value = 'Другой ответ'; const wait = defer(); a.answer(() => wait.promise);
+    const pending = a.api.ACT.comment({ id: 'bikes' }, null, a.s);
+    assert.equal(generic.p, 1); wait.resolve({ comments: [] }); await pending;
+    assert.equal(generic.p, 1);
+});
+test('reply and like quests require their own action in the selected post', () => {
+    for (const k of ['reply', 'like']) {
+        const a = app(), q = feedQuests(a, k);
+        a.api.questEvent(a.s, 'comment', 1, '', 'Ответ', { postId: 'sale' }); assert.equal(q.p, 0);
+        a.api.questEvent(a.s, k, 1, '', 'Ответ', { postId: 'bikes' }); assert.equal(q.p, 0);
+        a.api.questEvent(a.s, k, 1, '', 'Ответ', { postId: 'sale' }); assert.equal(q.p, 1);
+        if (k === 'like') { assert.equal(q.n, 1); assert.equal(q.done, true); }
+    }
+});
+test('quest generation validates post IDs and makes unscoped descriptions truthful', () => {
+    const a = app(); feedQuests(a);
+    assert.equal(a.api.makeQuest({ k: 'comment', targetPostId: 'invented' }, a.s), null);
+    const q = a.api.makeQuest({ k: 'comment', n: 2, title: 'Кендо', desc: 'О распродаже Кендо', trigger: 'dm', hook: { type: 'dm', from: 'Кендо' } }, a.s);
+    assert.equal(q.targetPostId, ''); assert.equal(q.hook, null); assert.equal(q.trigger, 'comment');
+    assert.equal(q.t, 'Разговор в ленте'); assert.equal(q.desc, 'Оставь 2 комментария в ленте UniHub.');
+    a.s.social.quests = [q]; a.api.questEvent(a.s, 'comment'); assert.equal(q.p, 0);
+    a.api.questEvent(a.s, 'comment', 1, '', '', { postId: 'bikes' }); assert.equal(q.p, 1);
+});
+test('legacy targeted counters and delayed hooks fail closed without taking back rewards', async () => {
+    const a = app(); feedQuests(a);
+    const q = { id: 'old', k: 'comment', t: 'Кендо', desc: 'Комментируй распродажу', n: 2, p: 0, r: { authority: 1, money: 0 }, trigger: 'comment', hook: { type: 'dm', from: 'Кендо' }, hookAt: 1 };
+    a.s.social.quests = [q]; a.api.questEvent(a.s, 'comment', 1, '', 'Мотоциклы', { postId: 'bikes' }); assert.equal(q.p, 0);
+    assert.match(a.api.questHTML(q), /Старое задание/);
+    a.api.fireHook(a.s, q, 'Мотоциклы'); await a.api.drainQueue(); assert.equal(a.calls.length, 0); assert.equal(q.hook, null);
+    q.done = true; q.p = 2; a.api.questEvent(a.s, 'comment', 1, '', '', { postId: 'sale' }); assert.equal(q.done, true); assert.equal(q.p, 2);
+});
+test('valid delayed DM hook retains selected post evidence', async () => {
+    const a = app(); a.setRandom(0.2); const q = feedQuests(a); a.answer(() => ({ reply: 'Что присматриваешь?' }));
+    a.api.questEvent(a.s, 'comment', 1, '', 'Пост Риты о распродаже: «Есть фонарь?»', { postId: 'sale' });
+    a.api.fireHook(a.s, q, q.hookDetail); await a.api.drainQueue(); await a.api.drainQueue();
+    assert.equal(a.calls.length, 1); assert.match(a.calls[0], /Есть фонарь/);
+    assert.equal(a.s.threads.find(t => t.name === 'Роберт Кендо').msgs.length, 1);
+});
+test('saved replies render one mention for full name, short name and collapsed handle', () => {
+    const a = app();
+    for (const text of ['@Тони пока ты первый!', '@Тони Редвуд @Тони пока ты первый!', '@ТониРедвуд, пока ты первый!', 'Тони, пока ты первый!']) {
+        const html = a.api.commentHTML({ id: 'c', author: 'Клэр', replyTo: 'Тони Редвуд', text, t: BASE }, { id: 'bikes' });
+        assert.equal((html.match(/@/g) || []).length, 1); assert.match(html, /пока ты первый!/);
+    }
+    assert.equal(a.api.stripMention('Шерил, ну ты зануда', 'Шерил Грант'), 'ну ты зануда');
+    assert.equal(a.api.stripMention('@Тонио другое имя', 'Тони Редвуд'), '@Тонио другое имя');
+    assert.equal(a.api.stripMention('Спасибо @Рик', 'Тони Редвуд'), 'Спасибо @Рик');
+    assert.equal(a.api.stripMention('@Шерил Грант', 'Шерил Грант'), '');
+});
+test('new AI replies remove duplicate mentions while preserving other mentions', async () => {
+    const a = app(); a.answer(() => [{ author: 'Клэр', replyTo: 'Тони Редвуд', text: '@Тони пока ты первый! Позови @Рика' }]);
+    const list = await a.api.aiComments(a.s, { author: 'Клэр', text: 'Мотоциклы', comments: [] }, 'Ответь');
+    assert.equal(list[0].text, 'пока ты первый! Позови @Рика');
+    assert.match(a.calls[0], /Адресата ответа указывай только в replyTo/);
+});
+function messengerApp(random = 0.2) {
+    const a = app(); a.setRandom(random); a.api.cfg().proactiveDMs = false;
+    a.answer(() => ({ reply: 'Привет! Как дела?', delta: 0, meet: null }));
+    const p = a.api.presenceFor(a.s, a.th.name); p.online = true; p.until = a.wall() + 8 * MIN;
+    return a;
+}
+function writeDM(a, text = 'Привет!') {
+    a.elements['sh-msg'] = { value: text };
+    return a.api.ACT.send({ id: a.th.id }, null, a.s);
+}
+test('closed messenger delivers online reply once with unread notification and unchanged story clock', async () => {
+    const a = messengerApp(); assert.equal(a.api.ui.open, false); const t = a.s.clock.t;
+    writeDM(a); a.api.tickMessenger(); a.api.tickMessenger(); await a.api.drainQueue();
+    assert.equal(a.th.msgs.filter(m => !m.me && !m.sys).length, 1); assert.equal(a.th.unread, 1);
+    assert.equal(a.calls.length, 1); assert.equal(a.th.pendingReply, undefined); assert.equal(a.s.clock.t, t); assert.equal(a.th.typing, false);
+});
+test('online contact can delay reply for a few minutes without showing false typing', async () => {
+    const a = messengerApp(0.8), job = writeDM(a);
+    assert.ok(job.at > a.wall()); assert.ok(job.at <= a.wall() + 3 * MIN); assert.equal(a.th.typing, undefined);
+    await a.api.drainQueue(); assert.equal(a.calls.length, 0);
+    a.setWall(job.at); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 1);
+});
+test('offline person briefly checks messenger and answers after several minutes', async () => {
+    const a = messengerApp(), p = a.api.presenceFor(a.s, a.th.name); p.online = false; p.until = a.wall() + 10 * MIN;
+    const job = writeDM(a); assert.equal(job.checkIn, true); assert.equal(a.calls.length, 0);
+    a.setWall(job.at); a.api.tickMessenger(); await a.api.drainQueue();
+    assert.equal(a.calls.length, 1); assert.equal(p.online, true); assert.equal(a.th.unread, 1);
+});
+test('busy contact waits for freedom according to the scene', async () => {
+    const a = messengerApp(); a.api.applyPresence(a.s, a.th, { busy: true, minutes: 30, reason: 'на работе' });
+    const job = writeDM(a); assert.equal(job.waitForFree, true);
+    a.setWall(job.at); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 0);
+    a.api.applyPresence(a.s, a.th, { busy: false, nearby: false });
+    a.setWall(job.at); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 1);
+});
+test('busy contact can check in briefly without pretending the job is over', async () => {
+    const a = messengerApp(0.8); a.api.applyPresence(a.s, a.th, { busy: true, minutes: 60, reason: 'на работе' });
+    const job = writeDM(a); assert.equal(job.waitForFree, false); assert.equal(job.checkIn, true);
+    a.setWall(job.at); a.api.tickMessenger(); await a.api.drainQueue();
+    assert.equal(a.calls.length, 1); assert.match(a.calls[0], /ненадолго заглянул/);
+    assert.equal(a.api.presenceFor(a.s, a.th.name).busy, true);
+    a.setWall(a.wall() + 3 * MIN); a.api.tickMessenger(); assert.equal(a.api.presenceFor(a.s, a.th.name).online, false);
+});
+test('sleeping contact remains offline until story time or scene says they woke up', async () => {
+    const a = messengerApp(0.8); a.api.applyPresence(a.s, a.th, { busy: true, sleeping: true, minutes: 60 });
+    const job = writeDM(a); a.setWall(job.at + 30 * MIN); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 0);
+    assert.equal(a.api.presenceFor(a.s, a.th.name).online, false);
+    a.s.clock.t += 60 * MIN; a.setWall(job.at); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 1);
+});
+test('multiple messages while waiting produce one reply using all latest text', async () => {
+    const a = messengerApp(0.8); const first = writeDM(a, 'Привет!'), second = writeDM(a, 'Ещё один вопрос');
+    assert.equal(second.at, first.at); a.setWall(second.at); a.api.tickMessenger(); await a.api.drainQueue();
+    assert.equal(a.calls.length, 1); assert.match(a.calls[0], /Привет!/); assert.match(a.calls[0], /Ещё один вопрос/);
+    assert.equal(a.th.msgs.filter(m => !m.me && !m.sys).length, 1);
+});
+test('saved delayed reply survives a reload including a stale typing flag', async () => {
+    const a = messengerApp(0.8), job = writeDM(a); a.th.typing = true;
+    const saved = JSON.parse(JSON.stringify(a.s));
+    const b = messengerApp(); b.context.chatMetadata.unihub = saved; b.setWall(job.at);
+    const s = b.api.S(), th = s.threads.find(t => t.id === 'char'); b.api.tickMessenger(s); await b.api.drainQueue();
+    assert.equal(b.calls.length, 1); assert.equal(th.pendingReply, undefined); assert.equal(th.typing, false); assert.equal(th.msgs.length, 2);
+});
+test('in-flight background reply is discarded when the current scene changes and retries fresh', async () => {
+    const a = messengerApp(), d = defer(); a.answer(() => d.promise); writeDM(a);
+    const running = a.api.drainQueue(); await Promise.resolve(); await Promise.resolve();
+    a.add('Персонаж ушёл на работу.'); d.resolve({ reply: 'Устаревший ответ' }); await running;
+    assert.equal(a.th.msgs.length, 1); assert.ok(a.th.pendingReply); assert.equal(a.th.typing, false);
+    a.answer(() => ({ reply: 'Свежий ответ' })); a.setWall(a.th.pendingReply.at); a.api.tickMessenger(); await a.api.drainQueue();
+    assert.equal(a.th.msgs[1].text, 'Свежий ответ');
+});
+test('queued background reply cannot arrive in another chat and resumes on returning', async () => {
+    const a = messengerApp(); writeDM(a); const metadata = a.context.chatMetadata;
+    a.context.chatMetadata = {}; a.context.chatId = 'b'; const b = a.api.S(); b.auth = true;
+    await a.api.drainQueue(); assert.equal(a.calls.length, 0); assert.equal(b.threads.length, 0);
+    a.context.chatMetadata = metadata; a.context.chatId = 'a'; a.api.tickMessenger(); await a.api.drainQueue();
+    assert.equal(a.calls.length, 1); assert.equal(a.th.msgs.length, 2);
+});
+test('main story generation defers the messenger without dropping the scheduled reply', async () => {
+    const a = messengerApp(); a.api.setGenerating(true); writeDM(a); await a.api.drainQueue(); assert.equal(a.calls.length, 0);
+    a.api.setGenerating(false); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 1);
+});
+test('acquaintance writes first with phone closed and never repeats an unanswered initiative', async () => {
+    const a = messengerApp(); a.api.cfg().proactiveDMs = true; a.add('Я ответила на вступление.', true);
+    a.th.known = true; a.th.relSyncKey = 'synced'; const ms = a.api.messengerState(a.s); ms.nextInitiativeAt = a.wall();
+    a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 1); assert.equal(a.th.msgs[0].me, false); assert.equal(a.th.msgs[0].initiative, true);
+    assert.equal(a.th.unread, 1); a.th.unread = 0; a.setWall(a.wall() + 40 * MIN); a.add('Новая сцена'); ms.nextInitiativeAt = a.wall();
+    a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 1);
+});
+test('disabled initiatives, empty openings, busy and co-present people produce no spontaneous messages', async () => {
+    for (const state of ['disabled', 'opening', 'busy', 'nearby']) {
+        const a = messengerApp(); a.api.cfg().proactiveDMs = state !== 'disabled'; if (state !== 'opening') a.add('Я ответила.', true);
+        a.th.known = true; a.th.relSyncKey = 'synced'; a.api.applyPresence(a.s, a.th, { busy: state === 'busy', nearby: state === 'nearby', minutes: 60 });
+        a.api.messengerState(a.s).nextInitiativeAt = a.wall(); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 0, state);
+    }
+});
+test('initiative can be declined without fabricated message, romance or meeting', async () => {
+    const a = messengerApp(); a.api.cfg().proactiveDMs = true; a.add('Ответ.', true); a.th.known = true; a.th.relSyncKey = 'synced';
+    a.answer(() => ({ reply: '', delta: 6, flirt: true, meet: { date: '2026-10-03', time: '19:00' } }));
+    a.api.messengerState(a.s).nextInitiativeAt = a.wall(); a.api.tickMessenger(); await a.api.drainQueue();
+    assert.equal(a.th.msgs.length, 0); assert.equal(a.th.rel, 0); assert.equal(a.th.pendingMeet, undefined); assert.equal(a.th.pendingReply, undefined);
+});
+test('availability inferred with relationships is applied and stale conclusions are rejected', async () => {
+    const a = messengerApp(); a.answer(() => ({ known: true, rel: 20, presence: { busy: true, sleeping: false, nearby: false, minutes: 40, reason: 'за рулём' } }));
+    await a.api.syncRel(a.s, a.th); const p = a.api.presenceFor(a.s, a.th.name); assert.equal(p.busy, true); assert.equal(p.online, false); assert.equal(p.reason, 'за рулём');
+    const d = defer(); a.answer(() => d.promise); const run = a.api.syncRel(a.s, a.th); await Promise.resolve(); a.add('Изменённая сцена');
+    d.resolve({ rel: 70, presence: { busy: false } }); await run; assert.equal(p.busy, true);
+});
+test('status dots match availability and group chats have no invented personal status', () => {
+    const a = messengerApp(); assert.match(a.api.presenceDot(a.s, a.th.name), /sh-presence online/);
+    a.api.applyPresence(a.s, a.th, { busy: true, reason: 'учится', minutes: 30 });
+    assert.match(a.api.presenceDot(a.s, a.th.name), /sh-presence offline/); assert.match(a.api.presenceDot(a.s, a.th.name), /учится/);
+    assert.equal(a.api.presenceDot(a.s, 'Группа', 'group'), ''); assert.match(a.api.chatsTab(a.s), /sh-presence offline/);
+    assert.match(a.api.threadView(a.s, a.th.id), /sh-presence offline/);
+});
+test('turning off initiatives cancels a delayed first message', async () => {
+    const a = messengerApp(0.8); a.api.cfg().proactiveDMs = true; a.add('Ответ.', true); a.th.known = true; a.th.relSyncKey = 'synced';
+    a.api.messengerState(a.s).nextInitiativeAt = a.wall(); a.api.tickMessenger(); const job = a.th.pendingReply; assert.ok(job.proactive);
+    a.api.cfg().proactiveDMs = false; a.setWall(job.at); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 0); assert.equal(a.th.pendingReply, undefined);
+});
+test('changing scene can allow a fresh initiative after a read ordinary reply', async () => {
+    const a = messengerApp(); writeDM(a); await a.api.drainQueue(); a.th.unread = 0;
+    a.api.cfg().proactiveDMs = true; a.th.known = true; a.th.relSyncKey = 'synced'; a.add('Ответ на вступление.', true); a.setWall(a.wall() + 30 * MIN); a.add('Позже персонаж вернулся домой.');
+    const p = a.api.presenceFor(a.s, a.th.name); p.online = true; p.until = a.wall() + 8 * MIN;
+    a.api.messengerState(a.s).nextInitiativeAt = a.wall(); a.api.tickMessenger(); await a.api.drainQueue();
+    assert.equal(a.calls.length, 2); assert.equal(a.th.msgs[2].initiative, true);
+});
+test('matching and a real comment create familiar contacts for spontaneous messages', () => {
+    const a = messengerApp(); a.api.cfg().proactiveDMs = true; a.add('Ответ.', true);
+    a.s.dating.matches.push({ name: 'Маша', bio: 'Дружба', species: '' });
+    a.s.feed.push({ id: 'bike', author: 'Клэр', text: 'Мотопробег', comments: [{ mine: true, text: 'Я!' }] });
+    a.api.tickMessenger(); assert.ok(a.s.threads.some(t => t.name === 'Маша' && t.known));
+    assert.ok(a.s.threads.find(t => t.name === 'Клэр').contactContext.includes('Я!'));
+    a.api.tickMessenger(); assert.equal(a.s.threads.filter(t => t.name === 'Клэр').length, 1);
+});
