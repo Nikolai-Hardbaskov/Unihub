@@ -7,10 +7,11 @@ const MIN = 60000;
 const BASE = new Date(2026, 0, 5, 10).getTime();
 const defer = () => { let resolve; const promise = new Promise(r => resolve = r); return { promise, resolve }; };
 function app() {
-    const timers = new Map(), events = new Map(), calls = [], prompts = [], elements = {};
+    const timers = new Map(), events = new Map(), calls = [], sceneCalls = [], prompts = [], elements = {};
     let wallNow = Date.now(), random = () => Math.random();
     const fakeMath = Object.create(Math); fakeMath.random = () => random();
     class FakeDate extends Date { constructor(...args) { super(...(args.length ? args : [wallNow])); } static now() { return wallNow; } }
+    let sceneAnswer = () => ({ state: 'apart', evidence: context.chat.filter(m => !m.is_system).slice(-1)[0]?.mes || '' });
     let nextTimer = 1, answer = async prompt => prompt.includes('Часы истории перед')
         ? { minutes: 10 } : { known: true, rel: 60, status: 'друзья', pair: false };
     const context = {
@@ -19,7 +20,7 @@ function app() {
         chat: [{ name: 'Алекс', mes: 'Привет!', send_date: 'first' }],
         eventSource: { on: (name, handler) => events.set(name, handler) },
         setExtensionPrompt: (id, prompt) => { if (id === 'unihub') prompts.push(prompt); },
-        generateRaw: async ({ prompt }) => { calls.push(prompt); return JSON.stringify(await answer(prompt)); },
+        generateRaw: async ({ prompt }) => { if (prompt.startsWith('UniHubSceneContact:')) { sceneCalls.push(prompt); return JSON.stringify(await sceneAnswer(prompt)); } calls.push(prompt); return JSON.stringify(await answer(prompt)); },
     };
     const box = {
         SillyTavern: { getContext: () => context }, Date: FakeDate, Math: fakeMath,
@@ -34,7 +35,7 @@ function app() {
         scheduleStorySync, flushStorySync, onStoryReply, buildInjection, bindStoryEvents,
         setClock, aiRaw, onChatChanged, readHorae, parseStoryTime, syncHoraeClock, pollHoraeClock,
         readChatClock, guessedStoryClock, hasStoryProgress, refreshQuests, makeQuest, questEvent, fireHook, stripMention, commentHTML, aiComments, ACT, ui, questHTML, questScopeReady, drainQueue: () => queue,
-        queueMessengerReply, tickMessenger, presenceFor, applyPresence, planInitiative, presenceDot, chatsTab, threadView, messengerState, startDM,
+        queueMessengerReply, tickMessenger, presenceFor, applyPresence, planInitiative, presenceDot, chatsTab, threadView, messengerState, startDM, sceneContactKey, sceneContactState, checkSceneContact, reply, startMeeting,
         setGenerating: value => { storyGenerating = value; }, getGenerating: () => storyGenerating };
     `;
     vm.runInNewContext(source.replace('    globalThis.UniHub =', exposed + '\n    globalThis.UniHub ='), box);
@@ -47,8 +48,8 @@ function app() {
     api.storySyncState(s);
     const names = ['CHAT_CHANGED', 'CHAT_LOADED', 'MESSAGE_RECEIVED', 'GENERATION_STARTED', 'GENERATION_ENDED', 'GENERATION_STOPPED', 'MESSAGE_EDITED', 'MESSAGE_UPDATED', 'MESSAGE_SWIPED', 'MESSAGE_SWIPE_DELETED', 'MESSAGE_DELETED', 'CHARACTER_MESSAGE_RENDERED', 'MESSAGE_SENT', 'USER_MESSAGE_RENDERED', 'MORE_MESSAGES_LOADED', 'CHARACTER_EDITED'];
     api.bindStoryEvents(context.eventSource, Object.fromEntries(names.map(n => [n, n])));
-    return { context, api, s, th, calls, prompts, timers, elements, window: box.window,
-        answer: fn => { answer = fn; }, setRandom: value => { random = typeof value === 'function' ? value : () => value; }, setWall: value => { wallNow = value; }, wall: () => wallNow, emit: (name, ...args) => events.get(name)?.(...args),
+    return { context, api, s, th, calls, sceneCalls, prompts, timers, elements, window: box.window,
+        answer: fn => { answer = fn; }, sceneAnswer: fn => { sceneAnswer = fn; }, setRandom: value => { random = typeof value === 'function' ? value : () => value; }, setWall: value => { wallNow = value; }, wall: () => wallNow, emit: (name, ...args) => events.get(name)?.(...args),
         flush: () => api.flushStorySync(api.S()),
         add: (mes, is_user = false) => { context.chat.push({ name: is_user ? 'Студент' : 'Алекс', mes, is_user, send_date: 'm' + context.chat.length }); return context.chat.length - 1; },
     };
@@ -527,8 +528,8 @@ test('saved delayed reply survives a reload including a stale typing flag', asyn
 });
 test('in-flight background reply is discarded when the current scene changes and retries fresh', async () => {
     const a = messengerApp(), d = defer(); a.answer(() => d.promise); writeDM(a);
-    const running = a.api.drainQueue(); await Promise.resolve(); await Promise.resolve();
-    a.add('Персонаж ушёл на работу.'); d.resolve({ reply: 'Устаревший ответ' }); await running;
+    const running = a.api.drainQueue(); for (let i = 0; i < 20 && !a.calls.length; i++) await Promise.resolve();
+    assert.equal(a.calls.length, 1); a.add('Персонаж ушёл на работу.'); d.resolve({ reply: 'Устаревший ответ' }); await running;
     assert.equal(a.th.msgs.length, 1); assert.ok(a.th.pendingReply); assert.equal(a.th.typing, false);
     a.answer(() => ({ reply: 'Свежий ответ' })); a.setWall(a.th.pendingReply.at); a.api.tickMessenger(); await a.api.drainQueue();
     assert.equal(a.th.msgs[1].text, 'Свежий ответ');
@@ -596,4 +597,89 @@ test('matching and a real comment create familiar contacts for spontaneous messa
     a.api.tickMessenger(); assert.ok(a.s.threads.some(t => t.name === 'Маша' && t.known));
     assert.ok(a.s.threads.find(t => t.name === 'Клэр').contactContext.includes('Я!'));
     a.api.tickMessenger(); assert.equal(a.s.threads.filter(t => t.name === 'Клэр').length, 1);
+});
+function leonDate(kind = 'char') {
+    const a = messengerApp(); a.context.name2 = 'Леон Кеннеди'; a.th.name = 'Леон Кеннеди'; a.th.kind = kind;
+    a.context.chat = [{ name: 'Леон Кеннеди', mes: 'Леон сидел напротив Ариши за столиком. Их свидание продолжалось, он держал её за руку.' }, { name: 'Ариша', is_user: true, mes: 'Я улыбнулась ему.' }];
+    a.s.profile.name = 'Ариша'; a.th.unread = 0; a.th.known = true; a.th.relSyncKey = 'synced';
+    const p = a.api.presenceFor(a.s, a.th.name); p.online = true; p.until = a.wall() + 8 * MIN;
+    a.sceneAnswer(() => ({ state: 'together', evidence: 'он держал её за руку' }));
+    return a;
+}
+test('Leon cannot initiate a Thursday invitation during their date, despite missing presence metadata', async () => {
+    const a = leonDate(); a.api.cfg().proactiveDMs = true; a.api.messengerState(a.s).nextInitiativeAt = a.wall();
+    a.answer(() => ({ reply: 'Будешь свободна в четверг?' }));
+    a.api.tickMessenger(); await a.api.drainQueue();
+    assert.equal(a.sceneCalls.length, 1); assert.match(a.sceneCalls[0], /Я улыбнулась ему/); assert.match(a.sceneCalls[0], /Их свидание продолжалось/);
+    assert.equal(a.calls.length, 0); assert.equal(a.th.msgs.length, 0); assert.equal(a.th.pendingReply, undefined); assert.equal(a.th.unread, 0);
+});
+test('NPC comment follow-up and quest hook cannot bypass a shared scene', async () => {
+    for (const source of ['comment', 'hook']) {
+        const a = leonDate('dm');
+        if (source === 'comment') a.api.startDM(a.s, { from: a.th.name, context: 'Обсуждали мотоциклы', intent: 'Написать первым' });
+        else { const q = a.api.makeQuest({ k: 'post', title: 'Разговор', desc: 'Опубликуй пост', trigger: 'post', hook: { type: 'dm', from: a.th.name, intent: 'Пригласить' } }, a.s); a.api.fireHook(a.s, q, 'Пост'); }
+        await a.api.drainQueue(); await a.api.drainQueue(); assert.equal(a.calls.length, 0, source); assert.equal(a.th.msgs.length, 0); assert.equal(a.th.pendingReply, undefined);
+    }
+});
+test('a pending invitation scheduled before the date is canceled when it becomes due', async () => {
+    const a = messengerApp(0.8); a.add('Алекс ждёт в другом месте.');
+    const job = a.api.queueMessengerReply(a.s, a.th, { initiate: 'Пригласи в четверг' });
+    a.add('Алекс теперь сидит со Студентом за одним столом.'); a.sceneAnswer(() => ({ state: 'together', evidence: 'сидит со Студентом за одним столом' }));
+    a.setWall(job.at); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 0); assert.equal(a.th.pendingReply, undefined);
+});
+test('a direct user message receives no private reply while the interlocutor is beside them', async () => {
+    const a = leonDate(); const job = writeDM(a, 'Привет, Леон'); await a.api.drainQueue();
+    assert.equal(a.calls.length, 0); assert.equal(job.sceneWait, 'together'); assert.equal(a.th.msgs.length, 1);
+    assert.match(a.api.threadView(a.s, a.th.id), /Собеседник рядом/);
+    a.add('Леон ушёл домой, Ариша осталась в кафе.'); a.sceneAnswer(() => ({ state: 'apart', evidence: 'Леон ушёл домой' }));
+    a.setWall(job.at); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 1); assert.equal(a.th.msgs.length, 2);
+});
+test('missing, ambiguous and invented scene evidence fails closed with a bounded retry', async () => {
+    for (const result of [{}, { state: 'unknown' }, { state: 'apart' }, { state: 'apart', evidence: 'Леон ушёл домой' }]) {
+        const a = leonDate(); a.sceneAnswer(() => result); const job = writeDM(a); await a.api.drainQueue();
+        assert.equal(a.calls.length, 0); assert.equal(job.sceneWait, 'unknown');
+        a.setWall(job.at); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.sceneCalls.length, 1);
+    }
+});
+test('a delayed scene analysis cannot certify a different or rerolled scene', async () => {
+    const a = messengerApp(), d = defer(); a.sceneAnswer(() => d.promise); writeDM(a); const run = a.api.drainQueue();
+    for (let i = 0; i < 20 && !a.sceneCalls.length; i++) await Promise.resolve();
+    a.context.chat[0].mes = 'Алекс рядом со Студентом.'; d.resolve({ state: 'apart', evidence: 'Привет!' }); await run;
+    assert.equal(a.calls.length, 0); assert.equal(a.th.sceneContact, undefined);
+    a.sceneAnswer(() => ({ state: 'together', evidence: 'Алекс рядом со Студентом' })); a.setWall(a.th.pendingReply.at); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 0);
+});
+test('reply finishing after shared-scene evidence arrives is not appended and creates no relationship effects', async () => {
+    const a = messengerApp(), d = defer(); a.answer(() => d.promise); writeDM(a); const run = a.api.drainQueue();
+    for (let i = 0; i < 30 && !a.calls.length; i++) await Promise.resolve(); assert.equal(a.calls.length, 1);
+    a.api.applyPresence(a.s, a.th, { busy: false, nearby: true }); d.resolve({ reply: 'Будешь свободна в четверг?', delta: 6, flirt: true }); await run;
+    assert.equal(a.th.msgs.length, 1); assert.equal(a.th.rel, 0); assert.equal(a.th.unread, undefined); assert.ok(a.th.pendingReply);
+});
+test('missing nearby field cannot erase a confirmed shared scene', async () => {
+    const a = messengerApp(); a.api.applyPresence(a.s, a.th, { busy: false, nearby: true }); a.api.applyPresence(a.s, a.th, { busy: false });
+    assert.equal(a.api.sceneContactState(a.s, a.th), 'together'); writeDM(a); await a.api.drainQueue(); assert.equal(a.calls.length, 0); assert.equal(a.sceneCalls.length, 0);
+});
+test('positive presence expires with scene edits, not with a real-time countdown', async () => {
+    const a = leonDate(); assert.equal(await a.api.checkSceneContact(a.s, a.th), 'together'); a.setWall(a.wall() + 10 * 60 * MIN);
+    assert.equal(a.api.sceneContactState(a.s, a.th), 'together'); a.add('Леон ушёл домой.');
+    assert.equal(a.api.sceneContactState(a.s, a.th), 'unknown'); a.sceneAnswer(() => ({ state: 'apart', evidence: 'Леон ушёл домой' }));
+    assert.equal(await a.api.checkSceneContact(a.s, a.th), 'apart');
+});
+test('jealousy messages use the same queue and are suppressed when the character is physically present', async () => {
+    const a = leonDate(); a.s.profile.relWithChar = true;
+    a.api.startMeeting(a.s, { with: 'Клэр', threadId: 'other', kind: 'date', place: 'cafe', at: a.s.clock.t });
+    await a.api.drainQueue(); assert.equal(a.calls.length, 0); assert.equal(a.th.msgs.length, 0);
+});
+function meetingForm(a) {
+    for (const [id, value] of Object.entries({ 'sh-m-kind': 'date', 'sh-m-place': 'cafe', 'sh-m-note': '', 'sh-m-time': '18:00', 'sh-m-day': '1' })) a.elements[id] = { value };
+}
+test('invitation response cannot bypass the shared-scene guard or grant a meeting', async () => {
+    const a = leonDate(); meetingForm(a); await a.api.ACT.proposeMeet({ id: a.th.id }, null, a.s);
+    assert.equal(a.calls.length, 0); assert.equal(a.s.meetings.length, 0); assert.equal(a.th.msgs.length, 0);
+});
+test('an invitation finishing after arrival cannot append a reply or change relationships', async () => {
+    const a = messengerApp(), d = defer(); meetingForm(a); a.answer(() => d.promise);
+    const run = a.api.ACT.proposeMeet({ id: a.th.id }, null, a.s);
+    for (let i = 0; i < 30 && !a.calls.length; i++) await Promise.resolve(); assert.equal(a.calls.length, 1);
+    a.api.applyPresence(a.s, a.th, { busy: false, nearby: true }); d.resolve({ accept: true, reply: 'Давай в четверг' }); await run;
+    assert.equal(a.th.msgs.length, 1); assert.equal(a.s.meetings.length, 0); assert.equal(a.th.rel, 0); assert.equal(a.th.pendingReply.sceneWait, 'together');
 });

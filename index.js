@@ -1198,10 +1198,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 s.jealousy.push({ with: m.with, how, t: NOW() });
                 updateRel(s, ct, -30, false, 40, `узнал(а) о свидании ${s.profile.name} с ${m.with}`);
                 notify(s, `💔 ${ct.name} узнал(а) о вашем свидании с ${m.with}…`, 'bad');
-                enqueue(s, async () => {
-                    const txt = await aiText(`${world(s)}\n${charCard()}\n\n${ct.name} и ${s.profile.name} — пара. ${ct.name} только что узнал(а), что ${s.profile.name} пошёл(пошла) на свидание с ${m.with}: ${how}. Напиши сообщение ${ct.name} в мессенджере UniHub строго в характере персонажа (ревность, обида, холод, злость, требование объяснений — как ему/ей свойственно). 1–3 предложения, только текст.`);
-                    if (txt) { ct.msgs.push({ me: false, text: cleanMsg(txt).slice(0, 600), t: NOW() }); ct.unread = (ct.unread || 0) + 1; ct.t = NOW(); }
-                });
+                if (!ct.pendingReply) queueMessengerReply(s, ct, { initiate: `${ct.name} и ${s.profile.name} — пара. ${ct.name} узнал(а) о свидании ${s.profile.name} с ${m.with}: ${how}. Может написать в своём характере (ревность, обида, холод, злость, требование объяснений), но только если они сейчас не находятся вместе. Если сейчас рядом — это разговор вслух, сообщение не отправляется.` });
             }
         }
     }
@@ -1997,7 +1994,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         <div class="sh-msgs">${th.msgs.map((m) => m.sys
         ? `<div class="sh-sys">${esc(m.text)}</div>`
         : `<div class="sh-msg ${m.me ? 'me' : ''}">${m.from ? `<b>${esc(m.from)}</b>` : ''}${esc(m.me ? m.text : stripThink(m.text).trim())}<time>${fmtT(m.gt ?? m.t)}</time></div>`).join('')}
-        ${th.typing ? `<div class="sh-msg typing">${esc(th.name)} печатает…</div>` : th.pendingReply ? `<div class="sh-sys">${th.pendingReply.waitForFree ? 'Ответит, когда освободится' : 'Сообщение отправлено · ожидается ответ'}</div>` : ''}</div>
+        ${th.typing ? `<div class="sh-msg typing">${esc(th.name)} печатает…</div>` : th.pendingReply ? `<div class="sh-sys">${th.pendingReply.sceneWait === 'together' ? 'Собеседник рядом · общайтесь в основной сцене' : th.pendingReply.sceneWait ? 'Проверяю присутствие в текущей сцене · ответ ожидает' : th.pendingReply.waitForFree ? 'Ответит, когда освободится' : 'Сообщение отправлено · ожидается ответ'}</div>` : ''}</div>
         <div class="sh-composer">${th.pendingMeet ? `<div class="sh-card sh-pending"><b><i class="fa-solid fa-handshake"></i> Похоже, вы договорились о встрече</b>
           <small>${esc(KINDS[th.pendingMeet.kind])}, ${fmtWhen(th.pendingMeet.at)}, ${esc(PLACES[th.pendingMeet.place])}${th.pendingMeet.note ? ` (${esc(th.pendingMeet.note)})` : ''}</small>
           ${th.pendingMeet.conflict ? `<small class="sh-bad-t"><i class="fa-solid fa-triangle-exclamation"></i> В это время у вас пара «${esc(th.pendingMeet.conflict.subject)}» (${fmtT(th.pendingMeet.conflict.start)}–${fmtT(th.pendingMeet.conflict.end)}).</small>
@@ -2399,7 +2396,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.17.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.17.1 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2537,7 +2534,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const p = presenceFor(s, th.name);
         p.busy = value.busy || value.sleeping === true;
         p.sleeping = value.sleeping === true;
-        p.nearby = value.nearby === true;
+        if (typeof value.nearby === 'boolean') { p.nearby = value.nearby; p.nearbySourceKey = storySyncKey(); }
         p.reason = p.busy ? cleanMsg(value.reason || (p.sleeping ? 'спит' : 'занят(а)')).slice(0, 80) : '';
         p.freeAt = p.busy ? NOW() + clamp(parseInt(value.minutes, 10) || (p.sleeping ? 480 : 30), 5, 480) * MIN : 0;
         p.visitUntil = 0;
@@ -2558,6 +2555,43 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const m = [...th.msgs].reverse().find((m) => m.me && !m.sys);
         return m ? JSON.stringify([m.id || m.t, m.text]) : '';
     }
+    function sceneContactContext() {
+        return (ctx().chat || []).filter((m) => m && !m.is_system && chatClockText(m)).slice(-8).map((m) => {
+            const text = chatClockText(m).replace(/\s+/g, ' ').trim();
+            return `${m.name || (m.is_user ? ctx().name1 : ctx().name2)}: ${text.length > 12000 ? `${text.slice(0, 4000)} [часть сообщения опущена] ${text.slice(-8000)}` : text}`;
+        }).join('\n');
+    }
+    function sceneContactKey(th) {
+        return String(hash(JSON.stringify([storySyncKey(), sceneContactContext(), th.name, th.kind, ctx().name1, ctx().name2])));
+    }
+    function sceneContactState(s, th) {
+        if (!privateThread(th) || !sceneContactContext()) return 'apart';
+        const p = presenceFor(s, th.name);
+        if (p.nearby && p.nearbySourceKey === storySyncKey()) return 'together';
+        return th.sceneContact?.key === sceneContactKey(th) ? th.sceneContact.state : 'unknown';
+    }
+    async function checkSceneContact(s, th) {
+        if (!privateThread(th) || !sceneContactContext()) return 'apart';
+        const key = sceneContactKey(th), cached = th.sceneContact;
+        if (sceneContactState(s, th) === 'together') return 'together';
+        if (cached?.key === key && (cached.state !== 'unknown' || Date.now() < cached.retryAt)) return cached.state;
+        const scene = sceneContactContext();
+        const result = await aiJSON(`UniHubSceneContact: проверь физическое присутствие перед личным сообщением. Это только анализ сцены, не продолжение истории.\nПользователь: ${s.profile.name} (${ctx().name1}). Собеседник: ${th.name}${th.kind === 'char' ? ` — основной персонаж {{char}}, имя в чате ${ctx().name2}` : ' — NPC'}.\nПоследние сообщения основного чата, по порядку:\n${scene}\n\nОпредели, находятся ли пользователь и собеседник СЕЙЧАС физически вместе. Совместное свидание, разговор, прогулка, одна машина или одно помещение — together. Присутствие сохраняется через короткие реплики и местоимения, пока в тексте не показано расставание или уход. План будущей встречи, вопрос о четверге, онлайн-статус, работа и переписка в приложении не доказывают, что они разошлись. Не путай планы и воспоминания с текущей сценой. apart — они в разных местах, либо текущая сцена ясно происходит без этого собеседника. Если данных недостаточно, текст обрезан и присутствие неясно, ответ некорректен или есть сомнения — unknown.\nОтвет JSON: {"state":"together, apart или unknown","evidence":"точная короткая цитата из сообщений, подтверждающая вывод"}. Для together и apart обязательна цитата; не придумывай доказательства.`);
+        if (S() !== s || storyGenerating || sceneContactKey(th) !== key) return 'unknown';
+        const evidence = typeof result?.evidence === 'string' ? result.evidence.replace(/\s+/g, ' ').trim() : '';
+        const state = ['together', 'apart'].includes(result?.state) && evidence.length >= 6 && scene.replace(/\s+/g, ' ').includes(evidence) ? result.state : 'unknown';
+        th.sceneContact = { key, state, evidence: state === 'unknown' ? '' : evidence.slice(0, 240), retryAt: Date.now() + MIN };
+        if (state !== 'unknown') { const p = presenceFor(s, th.name); p.nearby = state === 'together'; p.nearbySourceKey = storySyncKey(); }
+        save(s);
+        return state;
+    }
+    function holdSceneMessage(s, th, job, state) {
+        if (th.pendingReply !== job) return;
+        // Не переносим приглашения и инициативу со свидания на время после расставания.
+        if (state === 'together' && job.initiate) delete th.pendingReply;
+        else { job.sceneWait = state; job.at = Date.now() + 30 * 1000; }
+        save(s); render();
+    }
     function queueMessengerReply(s, th, opts = {}, now = Date.now()) {
         const p = privateThread(th) ? presenceFor(s, th.name, now) : { online: true };
         const old = th.pendingReply;
@@ -2574,6 +2608,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
     function dispatchMessengerReply(s, th, job, now) {
         if (th.typing || messengerQueued.has(job) || job.at > now) return false;
+        if (sceneContactState(s, th) === 'together') { holdSceneMessage(s, th, job, 'together'); return true; }
         const p = privateThread(th) ? presenceFor(s, th.name, now) : { online: true };
         if (p.sleeping || (p.busy && job.waitForFree)) { job.at = now + 30 * 1000; return true; }
         if (!p.online) {
@@ -2583,8 +2618,13 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         messengerQueued.add(job);
         enqueue(s, async () => {
             if (storyGenerating || uniHubGenerating || th.pendingReply !== job) return;
+            const sceneState = await checkSceneContact(s, th);
+            if (S() !== s || th.pendingReply !== job || storyGenerating) return;
+            if (sceneState !== 'apart') { holdSceneMessage(s, th, job, sceneState); return; }
+            delete job.sceneWait;
             const sourceKey = storySyncKey();
             const valid = () => S() === s && th.pendingReply === job && lastUserKey(th) === job.userKey && !storyGenerating && storySyncKey() === sourceKey
+                && sceneContactState(s, th) === 'apart'
                 && (!job.proactive || (cfg().proactiveDMs && hasStoryProgress() && !presenceFor(s, th.name).busy && !presenceFor(s, th.name).nearby));
             if (privateThread(th)) {
                 const current = presenceFor(s, th.name);
@@ -2594,6 +2634,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             try {
                 const r = await reply(s, th, { initiate: job.initiate, proactive: job.proactive, valid, availability: p.busy ? 'Собеседник занят и ненадолго заглянул в мессенджер. Ответь коротко, не утверждай, что он уже освободился.' : '' });
                 if (th.pendingReply !== job || S() !== s) return;
+                if (r?.sceneBlocked) { holdSceneMessage(s, th, job, r.sceneBlocked); return; }
                 if (r?.stale) { job.at = Date.now() + 20 * 1000; return; }
                 delete th.pendingReply;
                 if (r?.sent) { th.lastIncomingAt = Date.now(); th.lastIncomingStoryKey = sourceKey; }
@@ -2615,7 +2656,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             if (!privateThread(th) || th.typing || th.pendingReply || th.unread || th.known === false) return false;
             if (relevantForSync(s, th) && !th.relSyncKey) return false;
             const p = presenceFor(s, th.name, now), last = [...th.msgs].reverse().find((m) => !m.sys);
-            if (p.busy || p.sleeping || p.nearby) return false;
+            if (p.busy || p.sleeping || sceneContactState(s, th) === 'together') return false;
             if (last && !last.me && (last.initiative || now - last.t < 20 * MIN || th.lastIncomingStoryKey === storySyncKey())) return false;
             return now - (th.lastInitiativeAt || 0) >= 20 * MIN && (th.kind === 'char' || th.known === true || th.msgs.length > 0);
         });
@@ -2659,6 +2700,9 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
 
     async function reply(s, th, opts = {}) {
+        const sceneState = await checkSceneContact(s, th);
+        if (S() !== s || storyGenerating) return { stale: true };
+        if (sceneState !== 'apart') return { sceneBlocked: sceneState };
         messengerActive.add(th);
         th.typing = true; render();
         try {
@@ -2668,14 +2712,14 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 const story = recentStory(Number(cfg().chatContext) || 0);
                 const lore = await loreFor(`${story}\n${hist}`);
                 const scene = currentScene();
-                extra += `\n\n${charCard()}${lore ? `\n\nЛор мира, связанный с разговором:\n${lore}` : ''}${story ? `\n\nПоследние события основной истории (${th.name} их помнит):\n${story}` : ''}${scene ? `\n\n=== ТЕКУЩИЙ МОМЕНТ ИСТОРИИ (самое важное) ===\n${scene}\n=== конец ===\nПереписка происходит ПРЯМО СЕЙЧАС, в этот самый момент истории. Строго соблюдай его: где находится ${th.name}, что делает, рядом ли ${s.profile.name}, время суток. Нельзя противоречить сцене — например, писать «я на патруле», если в сцене ${th.name} стоит у двери ${s.profile.name}. Если они сейчас рядом, ${th.name} может удивиться сообщению («я же прямо за дверью»), ответить вслух или написать с учётом этого.` : ''}`;
+                extra += `\n\n${charCard()}${lore ? `\n\nЛор мира, связанный с разговором:\n${lore}` : ''}${story ? `\n\nПоследние события основной истории (${th.name} их помнит):\n${story}` : ''}${scene ? `\n\n=== ТЕКУЩИЙ МОМЕНТ ИСТОРИИ (самое важное) ===\n${scene}\n=== конец ===\nПереписка происходит ПРЯМО СЕЙЧАС, в этот самый момент истории. Строго соблюдай его: где находится ${th.name}, что делает, рядом ли ${s.profile.name}, время суток. Нельзя противоречить сцене — например, писать «я на патруле», если в сцене ${th.name} стоит у двери ${s.profile.name}. Если они сейчас рядом, не создавай сообщение: верни reply пустой строкой. Общение происходит вслух в основном чате.` : ''}`;
             }
             if (th.kind === 'dm') {
                 const sc = currentScene();
                 if (sc) extra += `\n\nТекущий момент основной истории: ${sc}`;
             }
             if (th.kind !== 'group') extra += `\n\nЭТО ЛИЧНАЯ ПЕРЕПИСКА только между ${th.name} и ${s.profile.name}: её никто больше не видит. Не обращайся в ней к третьим лицам («Майкл, скажи спасибо…», «@Келлер»), не пиши так, будто это комментарии или общий чат, — о других говори в третьем лице («скажу Майклу», «Майкл пусть спасибо скажет»). Комментарии в ленте — отдельное место.`;
-            if (th.kind !== 'group') extra += `\n\nПРАВИЛО ПРИСУТСТВИЯ: кто по текущей сцене находится рядом с ${s.profile.name} (в одном помещении, в одной машине, за одним столом), общается с ней/ним вслух. Никогда не проси ${s.profile.name} «передать», «сказать» или «попросить» того, кто сейчас рядом с ней/ним, — ты бы сказал(а) это сам(а) или написал(а) этому человеку напрямую. Если ты сам(а) — ${th.name} — сейчас рядом с ${s.profile.name}, ${opts.initiate ? 'ты не пишешь в мессенджер: верни reply пустой строкой ""' : 'ответь с учётом этого (удивись сообщению, скажи вслух или коротко напиши)'}.`;
+            if (th.kind !== 'group') extra += `\n\nПРАВИЛО ПРИСУТСТВИЯ: кто по текущей сцене находится рядом с ${s.profile.name} (в одном помещении, в одной машине, за одним столом), общается с ней/ним вслух. Никогда не проси ${s.profile.name} «передать», «сказать» или «попросить» того, кто сейчас рядом с ней/ним, — ты бы сказал(а) это сам(а) или написал(а) этому человеку напрямую. Если ты сам(а) — ${th.name} — сейчас рядом с ${s.profile.name}, ты не пишешь в мессенджер: верни reply пустой строкой "". Общение вслух остаётся в основном чате.`;
             const who = th.kind === 'group'
                 ? `участников учебной группы «${th.name}» (${th.bio}). Пиши от лица одного из участников в формате "Имя: текст".`
                 : th.kind === 'char'
@@ -2683,8 +2727,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                     : `${th.name}${th.species ? ` (вид: ${th.species})` : ''}${th.bio ? `. О себе: ${th.bio}` : ''}`;
             const relTxt = th.kind === 'group' ? '' : `\nОтношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100, шкала от −100 вражда до 100 близость).${th.relNote ? ` ${th.relNote}` : ''}${relLabel(th) === 'не знакомы' ? ` Они не знакомы — ${th.name} пишет как незнакомому человеку.` : ''}${th.kind === 'char' && s.profile.relWithChar ? ` ${th.name} и ${s.profile.name} — пара.` : ''}${jealousNote(s, th)}`;
             if (S() !== s || (opts.valid && !opts.valid())) return { stale: true };
+            if (sceneContactState(s, th) !== 'apart') return { sceneBlocked: sceneContactState(s, th) };
             const raw = await aiRaw(`${world(s)}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist || '(переписки ещё не было)'}\n\n${opts.initiate ? `${opts.initiate}\n\n` : ''}Напиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date(NOW()).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(NOW())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
             if (S() !== s || (opts.valid && !opts.valid())) return { stale: true };
+            if (sceneContactState(s, th) !== 'apart') return { sceneBlocked: sceneContactState(s, th) };
             const js = th.kind === 'group' ? null : parseJSON(raw);
             let r = cleanReply(js && typeof js.reply === 'string' ? js.reply : raw).replace(/^["«]+|["»]+$/g, '');
             const lastMine = [...th.msgs].reverse().find((m) => m.me);
@@ -2957,6 +3003,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 return;
             }
             return withBusy(`Ждём ответа от ${th.name}…`, async () => {
+                const state = await checkSceneContact(s, th);
+                if (S() !== s || storyGenerating) return;
+                if (state !== 'apart') return toast('info', state === 'together' ? 'Собеседник рядом. Обсудите встречу вслух в основном чате.' : 'Присутствие собеседника не удалось определить. Приглашение пока не отправлено.');
+                const sceneKey = sceneContactKey(th);
                 const m = { with: th.name, kind, place, note };
                 th.msgs.push({ me: true, text: `📅 Приглашение: ${meetText(m)}, ${fmtWhen(at)}`, t: now });
                 const r = await aiJSON(`${world(s)}${th.kind === 'char' ? `
@@ -2964,6 +3014,8 @@ ${charCard()}` : ''}
 
 ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species})` : ''} через UniHub: ${KINDS[kind]}, ${fmtWhen(at)}, ${PLACES[place]}${note ? `, ${note}` : ''}. Отношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100).${th.kind === 'char' && s.profile.relWithChar ? ' Они пара.' : ''} Реши, соглашается ли ${th.name}, учитывая отношения, характер${place === 'skip' ? ', то, что это прогул,' : ''} и тип встречи.
 Формат: {"accept":true,"reply":"ответ в мессенджере, 1–2 предложения"}`);
+                if (S() !== s) return;
+                if (storyGenerating || sceneContactKey(th) !== sceneKey || sceneContactState(s, th) !== 'apart') { queueMessengerReply(s, th); save(s); return; }
                 const accept = r?.accept === true || r?.accept === 'true';
                 th.msgs.push({ me: false, text: cleanMsg(r?.reply || (accept ? 'Давай!' : 'Прости, не получится.')).slice(0, 500), t: NOW() });
                 th.t = NOW();
