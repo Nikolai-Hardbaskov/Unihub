@@ -877,13 +877,31 @@ task — если назначена письменная отработка; ap
         const k = QUEST_KINDS[q.k] ? q.k : 'rp';
         const weak = weakSubjects(s);
         if (k === 'grade5' && !weak.includes(q.param)) return null;
+        const targetPostId = String(q.targetPostId || '');
+        const post = targetPostId ? s.feed.find((p) => p.id === targetPostId && !p.mine) : null;
+        if (targetPostId && !post) return null;
+        const n = clamp(parseInt(q.n, 10) || 1, 1, k === 'rp' || (k === 'like' && post) ? 1 : 8);
+        const scoped = postScopedEvent(k);
+        const action = { comment: `Оставь ${n} ${n === 1 ? 'комментарий' : n < 5 ? 'комментария' : 'комментариев'}`, reply: `Ответь на ${n} ${n === 1 ? 'чужой комментарий' : n < 5 ? 'чужих комментария' : 'чужих комментариев'}`, like: `Поставь ${n} ${n === 1 ? 'лайк' : n < 5 ? 'лайка' : 'лайков'}` }[k];
+        const trigger = scoped ? k : (TRIGGERS[q.trigger] ? q.trigger : (TRIGGERS[k] ? k : 'post'));
+        if (targetPostId && !scoped && !postScopedEvent(trigger)) return null;
+        // Descriptions and counters must promise the same verifiable action.
+        const desc = scoped ? `${action}${post ? ` к посту «${post.story || postText(post).slice(0, 70)}» (${post.author})` : ' в ленте UniHub'}.` : cleanMsg(q.desc || '').slice(0, 260);
+        const hook = q.hook && typeof q.hook === 'object' && (!postScopedEvent(trigger) || post) ? q.hook : null;
         return {
-            id: uid(), k, t: cleanMsg(q.title || 'Задание').slice(0, 60), desc: cleanMsg(q.desc || '').slice(0, 260),
-            n: clamp(parseInt(q.n, 10) || 1, 1, k === 'rp' ? 1 : 8), p: 0, done: false, param: k === 'grade5' ? q.param : '',
+            id: uid(), k, t: scoped && !post ? ({ comment: 'Разговор в ленте', reply: 'Ответ в комментариях', like: 'Поддержка в ленте' }[k]) : cleanMsg(q.title || 'Задание').slice(0, 60), desc,
+            n, p: 0, done: false, param: k === 'grade5' ? q.param : '', targetPostId, scopeVersion: 1,
             r: { authority: clamp(parseInt(q.authority, 10) || 2, 1, 6), money: clamp(parseInt(q.money, 10) || 0, 0, 300) },
-            hook: q.hook && typeof q.hook === 'object' ? q.hook : null, setup: '',
-            trigger: TRIGGERS[q.trigger] ? q.trigger : (TRIGGERS[k] ? k : 'post'),
+            hook, setup: '', trigger,
         };
+    }
+    const postScopedEvent = (k) => ['comment', 'reply', 'like'].includes(k);
+    const questScopeReady = (q) => !(postScopedEvent(q.k) || (q.hook && postScopedEvent(q.trigger))) || q.scopeVersion === 1;
+    function questMatchesPost(s, q, k, event) {
+        if (!questScopeReady(q)) return false;
+        if (!postScopedEvent(k)) return !q.targetPostId;
+        const p = s.feed.find((p) => p.id === event?.postId);
+        return !!p && (!q.targetPostId || q.targetPostId === p.id);
     }
     const TRIGGERS = { now: 'сразу', post: 'публикация поста', comment: 'комментарий', reply: 'ответ на комментарий', dm: 'сообщение в личке', like: 'лайк', follow: 'подписка', checkin: 'отметка на паре', homework: 'сдача задания', order: 'заказ доставки', buy: 'покупка на маркете', meet: 'договорённость о встрече' };
     /** Зацепка срабатывает в ответ на действие пользователя: ИИ пишет отклик с учётом того, что он(а) сделал(а). */
@@ -891,6 +909,7 @@ task — если назначена письменная отработка; ap
         const h = q.hook;
         q.hook = null;
         if (!h) return;
+        if (postScopedEvent(q.trigger) && (q.scopeVersion !== 1 || !q.targetPostId || q.hookPostId !== q.targetPostId || !s.feed.some((p) => p.id === q.targetPostId))) return;
         const act = TRIGGERS[q.trigger] || 'действие';
         if (h.type === 'story') {
             q.setup = cleanMsg(h.event || h.intent || '').slice(0, 300);
@@ -918,11 +937,12 @@ task — если назначена письменная отработка; ap
         });
     }
     /** Проверяет, не запускает ли действие пользователя чью-то зацепку. Отклик приходит через 1–3 минуты. */
-    function armHooks(s, k, detail) {
+    function armHooks(s, k, detail, event) {
         for (const q of soc(s).quests) {
-            if (!q.hook || q.hookAt || q.trigger !== k) continue;
+            if (!q.hook || q.hookAt || q.trigger !== k || !questMatchesPost(s, q, k, event)) continue;
             q.hookAt = Date.now() + (60 + Math.floor(Math.random() * 120)) * 1000;
             q.hookDetail = String(detail || '').slice(0, 300);
+            q.hookPostId = event?.postId || '';
         }
     }
     /** Новые задания раз в день: генерирует ИИ, без повторов. */
@@ -945,6 +965,7 @@ task — если назначена письменная отработка; ap
             const story = recentStory(8), scene = currentScene();
             const dms = s.threads.filter((t) => t.msgs.length).slice(0, 6).map((t) => `${t.name}: «${(t.msgs[t.msgs.length - 1].text || '').slice(0, 80)}»`).join('; ');
             const plots = s.stories.slice(-4).map((x) => `«${x.title}»: ${x.summary}`).join('; ');
+            const posts = s.feed.filter((p) => !p.mine).slice(0, 20).map((p) => ({ id: p.id, author: p.author, topic: p.story || '', text: postText(p).slice(0, 180) }));
             const r = await aiJSON(`${world(s)}\n\nПридумай 3 задания дня для ${s.profile.name} в приложении UniHub (${s.profile.faculty}, ${s.profile.year} курс).
 Типы (поле "k"):
 ${Object.entries(QUEST_KINDS).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
@@ -955,13 +976,15 @@ ${Object.entries(QUEST_KINDS).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
 - Задание типа rp — то, что ${s.profile.name} может сделать сам(а) по своей инициативе (убраться, вернуть книгу, приготовить сюрприз, помириться, разузнать).
 - Для интриги можно добавить зацепку hook — продолжение, которое наступит ТОЛЬКО В ОТВЕТ на действие ${s.profile.name}. Укажи trigger — какое действие её запускает: ${Object.entries(TRIGGERS).filter(([k]) => k !== 'now').map(([k, v]) => `${k} (${v})`).join(', ')}. Виды зацепок: {"type":"dm","from":"имя или Аноним","species":"вид","intent":"кто это и чего хочет"} — этот студент напишет в личку, откликнувшись на действие; {"type":"post","from":"имя","species":"вид","intent":"о чём пост"} — появится пост-отклик в ленте; {"type":"story","event":"что произойдёт в сюжете"} — рассказчик введёт событие в основную историю (для story можно trigger "now").
 - Описание задания начинай с действия ${s.profile.name}, а продолжение подавай как возможность, без спойлеров и гарантий: «Опубликуй пост о пропавшем амулете — вдруг кто-то что-то знает», а НЕ «Тебе написал аноним».
-- Для отслеживаемых типов (не rp) описание требует ровно само действие и число раз, без условий, которые нельзя проверить (вид автора, тема комментария и т.п.).
+- Для comment, reply и like можно выбрать конкретный пост: targetPostId — точный id из списка постов ниже. Описание требует действие и число раз именно в этом посте, без дополнительных условий о содержании ответа. Для like одного поста n всегда 1. Если targetPostId пуст, задание общее, без темы, имени или условий о содержании.
+- Зацепка с trigger comment, reply или like обязательно имеет targetPostId существующего поста. Она откликается только на действие в этом посте, никогда на комментарии в других темах. Для задания comment/reply/like к конкретному посту trigger совпадает с k.
+- Для остальных отслеживаемых типов (не rp) описание требует ровно само действие и число раз, без условий, которые нельзя проверить.
 - ${weak.length ? `Слабые предметы (для grade5): ${weak.join(', ')}.` : 'Слабых предметов нет — не давай grade5.'}
 - НЕ повторяй и не перефразируй прошлые задания: ${past.length ? past.join('; ') : 'их пока нет'}.
 ФАКТЫ:
 ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story ? `Последние события истории:\n${story}\n` : 'Истории пока нет.\n'}Переписки в UniHub: ${dms || 'нет'}.
-Сюжеты ленты: ${plots || 'нет'}.${loreStudentsLine(s, 8)}
-Формат: [{"k":"rp","title":"название","desc":"что сделать, 1–2 предложения","n":1,"param":"","authority":2,"money":50,"trigger":"post","hook":null}] — n: сколько раз (для rp всегда 1), authority 1–6, money 0–300; trigger нужен только вместе с hook.`);
+Сюжеты ленты: ${plots || 'нет'}. Посты для targetPostId: ${JSON.stringify(posts)}.${loreStudentsLine(s, 8)}
+Формат: [{"k":"rp","title":"название","desc":"что сделать, 1–2 предложения","n":1,"param":"","targetPostId":"","authority":2,"money":50,"trigger":"post","hook":null}] — n: сколько раз (для rp всегда 1), authority 1–6, money 0–300; trigger нужен только вместе с hook.`);
             if (S() !== s || !hasStoryProgress() || storySyncKey() !== sourceKey) { so.questDay = ''; so.questsLoading = false; return; }
             let list = (Array.isArray(r) ? r : []).map((q) => q && makeQuest(q, s)).filter(Boolean).slice(0, 3);
             if (!list.some((q) => q.k === 'rp') || list.length < 3) {
@@ -990,10 +1013,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const after = levelOf(so);
         if (after > before) { so.level = after; notify(s, `⬆️ Уровень UniHub ${after}!${PERKS[after] ? ` Открыто: ${PERKS[after]}.` : ''}`, 'important'); }
     }
-    function questEvent(s, k, amt = 1, param = '', detail = '') {
-        armHooks(s, k, detail);
+    function questEvent(s, k, amt = 1, param = '', detail = '', event = null) {
+        armHooks(s, k, detail, event);
         for (const q of soc(s).quests) {
-            if (q.k !== k || q.done || (q.param && q.param !== param)) continue;
+            if (q.k !== k || q.done || (q.param && q.param !== param) || !questMatchesPost(s, q, k, event)) continue;
             q.p = Math.min(q.n, q.p + amt);
             if (q.p >= q.n) completeQuest(s, q);
         }
@@ -1879,8 +1902,15 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     /** Убирает из начала текста @упоминание того, кому отвечают (UniHub ставит его сам). */
     function stripMention(text, name) {
         if (!name) return text;
-        const re = new RegExp(`^(\\s*@?${escRe(name)}[,:!]?\\s*)+`, 'i');
-        return String(text).replace(re, '').trim() || text;
+        const full = String(name).replace(/^@+/, '').trim();
+        if (!full) return text;
+        const first = full.split(/\s+/)[0];
+        const aliases = [...new Set([full, full.replace(/\s+/g, ''), first])].filter(Boolean).sort((a, b) => b.length - a.length).map(escRe).join('|');
+        // Match complete names/handles, never a prefix of another person's name.
+        const re = new RegExp(`^\\s*(?:@+(?:${aliases})(?=$|[^\\p{L}\\p{N}_])|${escRe(full)}(?=$|[^\\p{L}\\p{N}_])|${escRe(first)}(?=[,:!]))[,:!]?\\s*`, 'iu');
+        let out = String(text), next;
+        while ((next = out.replace(re, '')) !== out) out = next;
+        return out.trim();
     }
     function commentHTML(c, p) {
         const to = c.replyTo ? `<span class="sh-at">@${esc(c.replyTo)}</span> ` : '';
@@ -1920,6 +1950,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const rw = [q.r.authority ? `⭐ +${q.r.authority}` : '', q.r.money ? money(q.r.money) : ''].filter(Boolean).join(' · ');
         return `<div class="sh-quest ${q.done ? 'done' : ''}"><i class="fa-solid ${q.done ? 'fa-circle-check' : q.k === 'rp' ? 'fa-book-open' : 'fa-mobile-screen'}"></i>
           <div><b>${esc(q.t)}</b>${q.desc ? `<p>${esc(q.desc)}</p>` : ''}${q.setup && !q.done ? '<small><i class="fa-solid fa-hourglass-half"></i> событие ещё должно случиться в истории</small>' : ''}<small>${q.k === 'rp' ? 'в истории' : `${q.p}/${q.n}`}${rw ? ` · ${rw}` : ''}</small>
+          ${!q.done && !questScopeReady(q) ? '<small>Старое задание не содержит привязки к посту. Замените задания дня, чтобы включить точный учёт.</small>' : ''}
           ${q.k === 'rp' && !q.done ? `<button class="sh-btn sm ghost" data-act="checkQuest" data-id="${q.id}"><i class="fa-solid fa-magnifying-glass"></i> Проверить по истории</button>` : ''}</div></div>`;
     }
     function statsBlock(s) {
@@ -1934,7 +1965,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
           ${PERKS[lv + 1] ? `<small>На уровне ${lv + 1}: ${PERKS[lv + 1]}</small>` : ''}
         </div>
         <div class="sh-card"><h4>Задания дня</h4>${so.questsLoading && !so.quests.length ? '<p class="sh-muted"><i class="fa-solid fa-spinner fa-spin"></i> Придумываю задания…</p>' : so.quests.length ? so.quests.map((q) => questHTML(q)).join('') : `<p class="sh-muted">${hasStoryProgress() ? 'Задания появятся в течение минуты.' : 'Сюжетные задания появятся после вашего ответа на вступление в основном чате.'}</p>`}
-          ${so.rerollDay !== dkey(NOW()) && so.quests.length ? '<button class="sh-link" data-act="rerollQuests"><i class="fa-solid fa-rotate"></i> Заменить задания (раз в день)</button>' : ''}</div>`;
+          ${(so.rerollDay !== dkey(NOW()) || so.quests.some((q) => !questScopeReady(q))) && so.quests.length ? '<button class="sh-link" data-act="rerollQuests"><i class="fa-solid fa-rotate"></i> Заменить задания (раз в день)</button>' : ''}</div>`;
     }
     function meView(s) {
         const posts = s.feed.filter((p) => p.mine);
@@ -2368,7 +2399,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.16.3 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.16.4 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2548,7 +2579,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             p.mine && cancelled(s) ? `Сейчас ${s.profile.name} «отменяют» в сети: большинство комментаторов настроены враждебно, лишь пара человек заступается.` : '',
         ].filter(Boolean).join('\n');
         const scoreFmt = scoreWhat ? `\nТакже оцени ${scoreWhat} ${s.profile.name}: authority (−5…5 — насколько это подняло авторитет ${s.profile.name}: остроумие, смелость, поддержка, интересная мысль — плюс; грубость, кринж, глупость — минус), controversy (0…10 — насколько спорно или токсично), sentiment (positive, mixed или negative — как восприняло сообщество). Реакция комментаторов должна соответствовать оценке.\nЕсли кто-то из комментаторов пообещал написать ${s.profile.name} в личку, начал договариваться с ней/ним о встрече или явно хочет продолжить разговор наедине — заполни followup: {"from":"имя этого комментатора","is_char":true если это ${ctx().name2} — персонаж основной истории, иначе false,"intent":"что он(а) напишет в личке — например, уточнит день, время и место встречи"}. Иначе followup: null.` : '';
-        const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${postText(p)}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}${loreStudentsLine(s, 8)}${ctx().name2 && !ctx().groupId && (p.mine || Math.random() < 0.4) ? charCommentRule(s) : ''}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
+        const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${postText(p)}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}${loreStudentsLine(s, 8)}${ctx().name2 && !ctx().groupId && (p.mine || Math.random() < 0.4) ? charCommentRule(s) : ''}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное. Адресата ответа указывай только в replyTo; text начинается сразу с реплики, без @упоминания и повторного имени адресата.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
         const arr = Array.isArray(r) ? r : (Array.isArray(r?.comments) ? r.comments : []);
         const list = arr.filter((c) => c && c.author && c.text && cleanName(c.author) !== s.profile.name).slice(0, 8).map((c) => ({
             id: uid(), author: cleanName(c.author), species: SP(s, c.species), text: stripMention(cleanMsg(c.text), cleanName(c.replyTo)).slice(0, 400),
@@ -2743,6 +2774,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             const replyTo = ui.replyTo || '';
             (p.comments ||= []).push({ id: uid(), author: s.profile.name, text, t: Date.now(), likes: 0, mine: true, replyTo });
             byId('sh-cmt').value = ''; ui.replyTo = '';
+            const event = { postId: p.id };
+            const detail = `Пост ${p.author}: «${postText(p).slice(0, 140)}». ${replyTo ? `Ответ ${replyTo}: ` : 'Комментарий: '}«${text}»`;
+            questEvent(s, 'comment', 1, '', detail, event);
+            if (replyTo) questEvent(s, 'reply', 1, '', detail, event);
             p.loadingComments = true; save(s); render();
             const target = replyTo || (p.mine ? '' : p.author);
             const list = await aiComments(s, p, `${s.profile.name} только что написал(а) комментарий${replyTo ? ` в ответ ${replyTo}` : ''}: «${text}». Сгенерируй 1–3 ответа в ветке. ${target ? `${target} обязательно отвечает ${s.profile.name} (replyTo: "${s.profile.name}"). ` : 'Ответь от лица других студентов. '}Может подключиться ещё кто-то из комментаторов или новый студент.`, 'этот комментарий');
@@ -2750,8 +2785,6 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             applyScore(s, list.score, null);
             const fu = list.followup || guessFollowup(s, p, text, replyTo, list);
             if (fu) scheduleDM(s, fu, list.find((c) => c.author === cleanName(fu.from))?.species || s.feed.find((x) => x.author === cleanName(fu.from))?.species, `Пост ${p.author}: «${p.text.slice(0, 200)}»\n${shownComments(p).slice(-6).map((c) => `${c.author}: ${c.text}`).join('\n')}\n${list.map((c) => `${c.author}: ${c.text}`).join('\n')}`);
-            questEvent(s, 'comment', 1, '', text);
-            if (replyTo) questEvent(s, 'reply', 1, '', text);
             const st = p.story ? s.stories.find((x) => x.title === p.story) : null;
             if (st) { (st.userActs ||= []).push(text.slice(0, 160)); if (st.userActs.length > 5) st.userActs.shift(); questEvent(s, 'story'); }
             if (S() !== s) return;
@@ -2859,7 +2892,7 @@ ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species}
         },
         rerollQuests: (d, el, s) => {
             const so = soc(s), day = dkey(NOW());
-            if (so.rerollDay === day) return toast('info', 'Задания уже обновлялись сегодня. Новые появятся завтра.');
+            if (so.rerollDay === day && !so.quests.some((q) => !questScopeReady(q))) return toast('info', 'Задания уже обновлялись сегодня. Новые появятся завтра.');
             if (!confirm('Заменить задания дня на новые? Сделать это можно раз в день.')) return;
             so.rerollDay = day;
             so.questDay = '';
@@ -2975,7 +3008,7 @@ ${story}
             if (!f.includes(d.name) && Math.random() < 0.5) { s.social.followers += 1; notify(s, `👥 ${d.name} подписался(ась) на вас в ответ`, 'social'); }
             save(s); render();
         },
-        like: (d, el, s) => { const p = s.feed.find((x) => x.id === d.id); if (!p) return; p.liked = !p.liked; p.likes = Math.max(0, (p.likes || 0) + (p.liked ? 1 : -1)); if (p.liked && !p.mine) questEvent(s, 'like'); save(s); render(); },
+        like: (d, el, s) => { const p = s.feed.find((x) => x.id === d.id); if (!p) return; p.liked = !p.liked; p.likes = Math.max(0, (p.likes || 0) + (p.liked ? 1 : -1)); if (p.liked && !p.mine) questEvent(s, 'like', 1, '', `Пост ${p.author}: «${postText(p).slice(0, 200)}»`, { postId: p.id }); save(s); render(); },
         genFeed: (d, el, s) => withBusy('Загружаю ленту…', async () => {
             const now = Date.now(), name = s.profile.name;
             const act = s.stories.filter((x) => now - x.updated < 5 * DAY).slice(-4);
