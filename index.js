@@ -828,7 +828,11 @@ task — если назначена письменная отработка; ap
             if (!th && s.threads) { th = { id: uid(), name: 'Деканат факультета', species: '', bio: 'представитель администрации университета, пишет официально', kind: 'official', msgs: [], t: Date.now(), unread: 0, rel: 0 }; s.threads.unshift(th); }
             if (th) { th.msgs.push({ me: false, text: `📜 ${k.consequence}`, t: Date.now() }); th.unread = (th.unread || 0) + 1; k.letter = th.id; }
         }
-        if (!s.clock) s.clock = { mode: cfg().timeMode || 'game', t: Date.now(), source: 'старт' };
+        if (!s.clock) {
+            const mode = cfg().timeMode || 'game', start = new Date();
+            if (mode === 'game') start.setHours(9, 0, 0, 0);
+            s.clock = { mode, t: start.getTime(), source: 'старт' };
+        }
         if (!s.jealousy) s.jealousy = [];
         return s.social;
     }
@@ -1213,6 +1217,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         if (ts === s.clock.t || (ts < s.clock.t && !back)) return false;
         const jump = ts - s.clock.t;
         s.clock.t = Math.round(ts);
+        s.clock.storyInitialized = true;
         s.clock.source = source;
         s.clock.synced = Date.now();
         if (Math.abs(jump) >= 2 * HOUR) notify(s, `🕰️ Время истории: ${fmtFull(s.clock.t)} (${source})`, 'social');
@@ -1241,7 +1246,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         else if ((m = /(?:^|\s)(\d{1,2})[/-](\d{1,2})(?=\s|$)/.exec(str))) { mo = +m[1]; day = +m[2]; }
         else if ((m = /(\d{1,2})\s+(январ[ья]|феврал[ья]|март[а]?|апрел[ья]|ма[йя]|июн[ья]|июл[ья]|август[а]?|сентябр[ья]|октябр[ья]|ноябр[ья]|декабр[ья])(?:\s+(\d{4}))?/i.exec(str))) {
             const months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-            const name = m[2].toLowerCase(); mo = name.startsWith('ма') ? 5 : months.indexOf(name.slice(0, 3)) + 1;
+            const name = m[2].toLowerCase(); mo = /^(май|мая)$/.test(name) ? 5 : months.indexOf(name.slice(0, 3)) + 1;
             day = +m[1]; if (m[3]) y = +m[3];
         }
         if (mo < 1 || mo > 12 || day < 1 || day > 31) return null;
@@ -1321,6 +1326,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         if (!info) { state.horaeKey = null; return null; }
         if (state.horaeKey !== info.key) {
             state.horaeKey = info.key;
+            s.clock.storyInitialized = true;
             setClock(s, info.ts, 'Horae', true);
             if (s.clock.source !== 'Horae') { s.clock.source = 'Horae'; s.clock.synced = Date.now(); save(s); }
         }
@@ -1329,6 +1335,59 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     function pollHoraeClock() {
         const s = S();
         if (s?.auth && !storyGenerating && !uniHubGenerating) syncHoraeClock(s);
+    }
+    function chatClockText(message) {
+        return String(message?.mes || '')
+            .replace(/<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?>/gi, '')
+            .replace(/<horae\w*\b[^>]*>[\s\S]*?<\/horae\w*>/gi, '')
+            .replace(/<[^>]+>/g, ' ').trim();
+    }
+    /** Только явно обозначенные часы текущей сцены, а не время запланированной встречи. */
+    function readChatClock(base, initial = false) {
+        const messages = (ctx().chat || []).filter((m) => m && !m.is_system).slice(initial ? -12 : -2);
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const later = messages.slice(i + 1).map(chatClockText).join('\n');
+            if (/(через|спустя|наступил|следующ[а-яё]*\s+(день|утро)|стемнело)/i.test(later)) continue;
+            for (const line of chatClockText(messages[i]).split(/\n|(?<=[!?])\s+/).reverse()) {
+                const marker = /(сейчас|на часах|часы\s+показыва[а-яё]*|текущее время|время\s*[:：])/i.exec(line);
+                const value = marker ? line.slice(marker.index) : line.trim();
+                if (!marker && !/^\d{4}[./-]\d{1,2}[./-]\d{1,2}\s+\d{1,2}:\d{2}\s*$/.test(value)) continue;
+                if (/(завтра|вчера|будет|было|назнач|встретимся|планиру|вспомни|в прошл|в следующ)/i.test(value)) continue;
+                const ts = parseStoryTime(value, base);
+                if (ts !== null) return ts;
+            }
+        }
+        return null;
+    }
+    /** Выбор сюжетных часов без модели: переходы из текста, затем сохранённое время + шаг. */
+    function guessedStoryClock(text, base, initial = false) {
+        const d = new Date(base);
+        if (/(следующ[а-яё]*\s+утро|наутро)/i.test(text)) return nextMorning(base);
+        const jump = /(?:через|спустя)\s+(\d+|полчаса|час|полтора|два|три)\s*(минут[а-яё]*|час[а-яё]*|дн[а-яё]*|день)?/i.exec(text);
+        if (jump) {
+            const n = /^\d+$/.test(jump[1]) ? +jump[1] : ({ полчаса: 30, час: 1, полтора: 1.5, два: 2, три: 3 })[jump[1].toLowerCase()];
+            const unit = jump[1].toLowerCase() === 'полчаса' || /минут/i.test(jump[2] || '') ? MIN
+                : /дн|день/i.test(jump[2] || '') ? DAY : /час/i.test(jump[2] || jump[1]) ? HOUR : null;
+            if (unit && Number.isFinite(n)) return base + clamp(n, 0, 1440) * unit;
+        }
+        const part = [...text.matchAll(/(?:наступил[аои]?|был[аои]?|стало|сейчас)\s+(?:ранн[а-яё]*\s+|поздн[а-яё]*\s+)?(утро|день|вечер|ночь)/gi)].at(-1);
+        if (part) {
+            const hour = { утро: 9, день: 13, вечер: 18, ночь: 23 }[part[1].toLowerCase()];
+            if (/следующ[а-яё]*\s+день/i.test(text)) d.setDate(d.getDate() + 1);
+            d.setHours(hour, 0, 0, 0);
+            return d.getTime();
+        }
+        if (/следующ[а-яё]*\s+день/i.test(text)) { d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.getTime(); }
+        if (initial) { d.setHours(9, 0, 0, 0); return d.getTime(); }
+        const step = Number(cfg().stepMin);
+        return base + (Number.isFinite(step) ? Math.max(0, step) : 10) * MIN;
+    }
+    function applyStoryClock(s, ts, source, back = false) {
+        if (!Number.isFinite(ts)) return false;
+        setClock(s, ts, source, back);
+        s.clock.storyInitialized = true;
+        if (s.clock.source !== source) { s.clock.source = source; s.clock.synced = Date.now(); save(s); }
+        return true;
     }
     /** После каждого ответа истории: Horae → определение ИИ → шаг по умолчанию. */
     function onStoryReply(messageId) {
@@ -1347,17 +1406,23 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         }
         save(s);
     }
-    async function onStoryMessage(s, last, sourceKey, base) {
+    async function onStoryMessage(s, last, sourceKey, base, initial = false) {
         if (!s || !s.auth || !gameMode(s)) return;
         const c = cfg(), startClock = s.clock.t;
         const current = () => S() === s && gameMode(s) && storySyncKey() === sourceKey && s.clock.t === startClock;
-        if (!last || last.is_user || last.is_system) return;
         if (c.syncHorae && syncHoraeClock(s)) return;
+        if (!initial && (!last || last.is_user || last.is_system)) return;
+        const direct = readChatClock(base, initial);
+        if (direct !== null) { if (current()) applyStoryClock(s, direct, 'время из чата', true); return; }
+        const messages = (ctx().chat || []).filter((m) => m && !m.is_system).slice(-12);
+        const context = messages.map((m) => `${m.name || (m.is_user ? ctx().name1 : ctx().name2)}: ${chatClockText(m).slice(-1000)}`).join('\n').slice(-9000);
+        const text = chatClockText(last || messages.at(-1)).slice(-2500);
+        const fallbackText = initial ? context : `${chatClockText(messages.at(-2))}\n${text}`;
+        if (!messages.length) { if (current()) applyStoryClock(s, guessedStoryClock('', base, initial), 'UniHub: выбранное время', initial); return; }
         if (c.syncAI) {
-            const text = String(last.mes || '').replace(/<[^>]+>/g, ' ').slice(-2500);
-            const r = await aiJSON(`Часы истории перед этим сообщением показывали: ${isoDay(base)} ${fmtT(base)} (${fmtFull(base)}).\nСообщение истории:\n${text}\n\nОпредели, сколько времени прошло в истории за это сообщение. Если в тексте явно названо текущее время, дата или переход («наступило утро», «через час», «в 18:00», «на следующий день») — учти это. Не принимай упоминание прошлой или будущей встречи за текущее время. Обычный диалог без переходов — 1–15 минут.\nФормат: {"minutes":число прошедших минут от 0 до 1440,"date":"ГГГГ-ММ-ДД только если явно названа текущая дата, иначе null","time":"ЧЧ:ММ если текст явно называет текущее время, иначе null","nextDay":true если явно наступил следующий день}`);
+            const r = await aiJSON(`Часы истории перед этим сообщением показывали: ${isoDay(base)} ${fmtT(base)} (${fmtFull(base)}).\nПоследние сообщения основного чата (учитывай сообщения пользователя и персонажа):\n${context}\n\n${initial ? 'Первичная установка времени: определяй текущий момент в конце этой истории, не добавляй шаг за старый ответ повторно.' : `Новый или изменённый ответ истории:\n${text}`}\n\nОпредели текущие дату и часы по истории. Приоритет — явно названное время текущей сцены, затем переходы («наступило утро», «через час», «на следующий день»). Не принимай прошлые воспоминания и будущие встречи за настоящее. Если точных часов нет, САМ ВЫБЕРИ правдоподобное сюжетное время по сцене; отметь inferred: true. ${initial ? 'Если нет никаких подсказок, выбери 09:00 на дате сохранённых часов. Не используй реальные часы устройства.' : 'Если нет подсказок, продолжай от сохранённых сюжетных часов: обычный разговор занимает 1–15 минут. Не возвращайся к старому времени из предыдущих сообщений без сюжетного основания.'}\nФормат: {"minutes":число минут от 0 до 1440 прошедших именно за новый ответ, "date":"ГГГГ-ММ-ДД текущей даты, если она определена по сюжету, иначе null", "time":"ЧЧ:ММ текущего или самостоятельно выбранного сюжетного времени, иначе null", "nextDay":true если наступил следующий день, "inferred":true если время выбрано самостоятельно, иначе false}`);
             if (!current()) return;
-            if (r && typeof r === 'object') {
+            if (r && typeof r === 'object' && !Array.isArray(r)) {
                 let ts = base + clamp(Math.round(+r.minutes || 0), 0, 1440) * MIN;
                 const tm = /^(\d{1,2}):(\d{2})$/.exec(String(r.time || '').trim());
                 const dated = /^\d{4}-\d{2}-\d{2}$/.test(String(r.date || '')) && parseStoryTime(`${r.date} 00:00`, base) !== null;
@@ -1367,12 +1432,16 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 } else if (dated) {
                     ts = parseStoryTime(`${r.date} ${fmtT(base)}`, base) + clamp(Math.round(+r.minutes || 0), 0, 1440) * MIN;
                 } else if (r.nextDay === true && ts < nextMorning(base) - 2 * HOUR) ts = nextMorning(base);
-                if (setClock(s, ts, 'ИИ по тексту', !!dated || !!(tm && +tm[1] < 24 && +tm[2] < 60))) return;
-                return;
+                const timed = !!(tm && +tm[1] < 24 && +tm[2] < 60);
+                const minutes = r.minutes !== null && r.minutes !== undefined && r.minutes !== '' && Number.isFinite(Number(r.minutes));
+                if (timed || dated || minutes || r.nextDay === true) {
+                    if (initial && !timed && !dated && r.nextDay !== true) ts = guessedStoryClock(fallbackText, base, true);
+                    applyStoryClock(s, ts, r.inferred === true ? 'ИИ: выбранное время' : 'ИИ по чату', initial || (r.inferred !== true && (dated || timed)));
+                    return;
+                }
             }
         }
-        const step = Number(c.stepMin);
-        if (current()) setClock(s, base + (Number.isFinite(step) ? Math.max(0, step) : 10) * MIN, 'шаг за сообщение');
+        if (current()) applyStoryClock(s, guessedStoryClock(fallbackText, base, initial), 'UniHub: выбранное время', initial);
     }
 
     // События чата объединяются: один запрос на итоговый текст, без запросов на каждый токен.
@@ -1393,7 +1462,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         let state = storySyncStates.get(s);
         if (!state) {
             state = { timer: null, running: null, pending: false, clock: false,
-                clockKey: latestStoryReply()?.key, counted: new WeakSet((ctx().chat || []).filter((m) => m && typeof m === 'object')) };
+                clockKey: storySyncKey(), counted: new WeakSet((ctx().chat || []).filter((m) => m && typeof m === 'object')) };
             storySyncStates.set(s, state);
         }
         return state;
@@ -1416,16 +1485,17 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 syncHoraeClock(s);
                 const sourceKey = storySyncKey(), last = latestStoryReply(), clock = state.clock;
                 state.clock = false;
-                if (clock && last && state.clockKey !== last.key && gameMode(s)) {
+                const initial = s.clock.source === 'старт' && !s.clock.storyInitialized;
+                if (gameMode(s) && (initial || (clock && last && state.clockKey !== sourceKey))) {
                     const old = s.clock.syncMessage;
-                    const base = state.replacement?.index === last.index ? state.replacement.base
-                        : old && (state.clockMessage === last.message || old.id === last.id) ? old.base : s.clock.t;
-                    state.clockMessage = last.message;
-                    s.clock.syncMessage = { id: last.id, base };
-                    await onStoryMessage(s, last.message, sourceKey, base);
+                    const base = !initial && state.replacement?.index === last?.index ? state.replacement.base
+                        : !initial && old && (state.clockMessage === last?.message || old.id === last?.id) ? old.base : s.clock.t;
+                    state.clockMessage = last?.message;
+                    if (last) s.clock.syncMessage = { id: last.id, base };
+                    await onStoryMessage(s, last?.message, sourceKey, base, initial);
                     if (S() !== s) break;
                     if (storySyncKey() !== sourceKey) { state.pending = true; state.clock = true; continue; }
-                    state.clockKey = last.key;
+                    state.clockKey = sourceKey;
                     state.replacement = null;
                     save(s);
                 }
@@ -2075,8 +2145,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         <div class="sh-card sh-form"><h4>Точное время</h4><label>Дата<input id="sh-c-date" type="date" value="${iso}"></label><label>Время<input id="sh-c-time" type="time" value="${fmtT(s.clock.t)}"></label><button class="sh-btn sm ghost" data-act="clockSet">Установить</button></div>
         <div class="sh-card sh-form"><h4>Синхронизация с историей</h4>
           <label class="sh-toggle"><input type="checkbox" data-change="cfgBool" data-k="syncHorae" ${c.syncHorae ? 'checked' : ''}><span>Брать время из Horae</span></label>
-          <label class="sh-toggle"><input type="checkbox" data-change="cfgBool" data-k="syncAI" ${c.syncAI ? 'checked' : ''}><span>ИИ определяет время по тексту</span></label>
-          <label>Если оба выключены или не сработали — минут за каждый ответ истории<input type="number" min="0" max="120" data-change="cfg" data-k="stepMin" value="${esc(c.stepMin)}"></label>
+          <label class="sh-toggle"><input type="checkbox" data-change="cfgBool" data-k="syncAI" ${c.syncAI ? 'checked' : ''}><span>ИИ читает или подбирает время по истории</span></label>
+          <label>Если время не удалось определить — минут за каждый ответ истории<input type="number" min="0" max="120" data-change="cfg" data-k="stepMin" value="${esc(c.stepMin)}"></label>
           <button class="sh-btn sm ghost" data-act="checkHorae"><i class="fa-solid fa-link"></i> Проверить связь с Horae</button>
           <small>Часы идут только вперёд и только когда движется история. Пока вы не играете, пары и дедлайны не наступают.</small></div>`
         : '<div class="sh-note"><i class="fa-solid fa-clock"></i><span>Пары, дедлайны, встречи и задания идут по часам телефона. Подходит, если вы играете синхронно с реальным временем.</span></div>'}`;
@@ -2280,7 +2350,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.16.1 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.16.2 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -3499,7 +3569,7 @@ ${story ? `Последние события истории:\n${story}\nЕсли
             const s = S();
             if (s?.auth) {
                 const state = storySyncState(s);
-                state.clockKey = latestStoryReply()?.key;
+                state.clockKey = storySyncKey();
                 state.clock = false;
             }
             scheduleStorySync();
