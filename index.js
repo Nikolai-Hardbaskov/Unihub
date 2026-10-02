@@ -320,7 +320,8 @@
     let saveTimer = null;
     function save(s) {
         if (s && S() !== s) return;
-        updateInjection();
+        stampGame(s);
+        scheduleStorySync();
         clearTimeout(saveTimer);
         saveTimer = setTimeout(() => { try { ctx().saveMetadata?.(); } catch (e) { logErr('[UniHub] save', e); } }, 400);
     }
@@ -406,8 +407,10 @@
 
     // новые версии ST принимают объект параметров, старые — позиционные аргументы
     const objStyle = (fn) => fn.length === 0 || /^[^(]*\(\s*\{/.test(Function.prototype.toString.call(fn));
+    let uniHubGenerating = 0;
     async function aiRaw(prompt) {
         const c = ctx();
+        uniHubGenerating++;
         try {
             if (typeof c.generateRaw === 'function') {
                 if (objStyle(c.generateRaw)) return await c.generateRaw({ prompt, systemPrompt: SYS });
@@ -419,6 +422,11 @@
                 return await c.generateQuietPrompt(q, false, true);
             }
         } catch (e) { logErr('[UniHub] AI error', e); }
+        finally {
+            uniHubGenerating--;
+            const s = S();
+            if (!uniHubGenerating && s?.auth && storySyncStates.get(s)?.pending) setTimeout(() => flushStorySync(s), 0);
+        }
         return '';
     }
     /** Убирает размышления модели и служебные блоки других расширений (Horae и т.п.). */
@@ -1048,12 +1056,21 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
     function needsRelSync(s, th) {
         if (th.relSyncing || !relevantForSync(s, th)) return false;
-        const len = (ctx().chat || []).length;
-        return th.relSyncLen === undefined || len - th.relSyncLen >= 6;
+        return th.relSyncKey !== relationSyncKey(th);
+    }
+    function storySyncKey() {
+        return JSON.stringify((ctx().chat || []).filter((m) => m && !m.is_system).slice(-30)
+            .map((m) => [m.name, !!m.is_user, m.swipe_id, m.mes]));
+    }
+    function relationSyncKey(th) {
+        return String(hash(JSON.stringify([storySyncKey(), charCard(), th.bio, lorePerson(S(), th.name),
+            th.msgs.filter((m) => !m.sys).slice(-10).map((m) => [m.me, m.text])])));
     }
     /** Определяет текущие отношения по карточке, основной истории и переписке (история важнее карточки). */
     async function syncRel(s, th) {
         if (th.relSyncing) return;
+        const syncKey = relationSyncKey(th);
+        const clockMode = s.clock?.mode;
         th.relSyncing = true; render();
         try {
             const c = ctx(), ch = c.characters?.[c.characterId];
@@ -1063,7 +1080,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
                 : `${th.name}${th.species ? ` (${th.species})` : ''}. ${th.bio || ''}${lp ? ` Из лора: ${lp.bio}${lp.relation ? `; для ${c.name2}: ${lp.relation}` : ''}.` : ''}`;
             const dms = th.msgs.filter((m) => !m.sys).slice(-10).map((m) => `${m.me ? s.profile.name : th.name}: ${m.text}`).join('\n');
             const r = await aiJSON(`${about}\n\nПоследние события основной истории:\n${recentStory(20) || '(истории пока нет)'}\n\nПереписка в UniHub:\n${dms || '(не переписывались)'}\n\nОпредели, какие СЕЙЧАС отношения у ${th.name} с ${s.profile.name}. Опирайся на факты: история и переписка важнее карточки — если по карточке они не знакомы, а в истории уже подружились или начали встречаться, верь истории. Если они ещё ни разу не общались и не знакомы — known: false.\nФормат: {"known":true,"rel":число от −100 (вражда) до 100 (самые близкие),"status":"короткий статус по-русски: не знакомы, знакомые, приятели, друзья, близкие друзья, флирт, пара, соперники, неприязнь, вражда…","pair":true если они сейчас в романтических отношениях,"note":"одной фразой, на чём основан вывод"}`);
-            if (S() !== s || !r || typeof r !== 'object') return;
+            if (S() !== s || relationSyncKey(th) !== syncKey || s.clock?.mode !== clockMode || !r || typeof r !== 'object') return;
             th.known = r.known !== false;
             th.rel = clamp(Math.round(+r.rel || 0), -100, 100);
             th.relAtSync = th.rel;
@@ -1073,6 +1090,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             th.relNote = cleanMsg(r.note || '').slice(0, 200);
             th.pair = r.pair === true || r.pair === 'true';
             th.relSyncLen = (ctx().chat || []).length;
+            th.relSyncKey = syncKey;
             if (th.kind === 'char' && th.pair !== !!s.profile.relWithChar) {
                 s.profile.relWithChar = th.pair;
                 notify(s, th.pair ? `💞 По истории вы с ${th.name} — пара. Отмечено в профиле.` : `По истории вы с ${th.name} сейчас не пара. Отметка в профиле снята.`, 'social');
@@ -1251,12 +1269,15 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         for (const [, v] of found) { const ts = parseStoryTime(v, base); if (ts) return ts; }
         return null;
     }
-    let syncing = false;
     /** После каждого ответа истории: Horae → определение ИИ → шаг по умолчанию. */
-    function onStoryReply() {
+    function onStoryReply(messageId) {
         const s = S(), chat = ctx().chat || [];
-        const last = chat[chat.length - 1];
+        const last = chat[Number.isInteger(messageId) ? messageId : chat.length - 1];
         if (!s || !s.auth || !last || last.is_user || last.is_system) return;
+        const state = storySyncState(s);
+        if (state.counted.has(last)) return;
+        state.counted.add(last);
+        if (state.replacement?.index === messageId) return;
         s.replyCount = (s.replyCount || 0) + 1;
         for (const o of s.orders) {
             if ((o.kind !== 'food' && o.kind !== 'grocery') || o.stage === 'delivered' || !o.injected) continue;
@@ -1265,34 +1286,101 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         }
         save(s);
     }
-    async function onStoryMessage() {
-        const s = S();
-        if (!s || !s.auth || !gameMode(s) || syncing) return;
-        const c = cfg(), chat = ctx().chat || [];
-        const last = chat[chat.length - 1];
+    async function onStoryMessage(s, last, sourceKey, base) {
+        if (!s || !s.auth || !gameMode(s)) return;
+        const c = cfg(), startClock = s.clock.t;
+        const current = () => S() === s && gameMode(s) && storySyncKey() === sourceKey && s.clock.t === startClock;
         if (!last || last.is_user || last.is_system) return;
-        if (c.syncHorae) { const ts = readHorae(); if (ts && setClock(s, ts, 'Horae')) return; }
-        if (c.syncAI) {
-            syncing = true;
-            try {
-                const text = String(last.mes || '').replace(/<[^>]+>/g, ' ').slice(-2500);
-                const r = await aiJSON(`Часы истории сейчас показывают: ${fmtFull(s.clock.t)}.\nНовое сообщение истории:\n${text}\n\nОпредели, сколько времени прошло в истории за это сообщение. Если в тексте явно названо время или переход («наступило утро», «через час», «в 18:00», «на следующий день») — учти это. Обычный диалог без переходов — 1–15 минут.\nФормат: {"minutes":число прошедших минут от 0 до 1440,"time":"ЧЧ:ММ если текст явно называет текущее время, иначе null","nextDay":true если явно наступил следующий день}`);
-                if (S() !== s) return;
-                if (r && typeof r === 'object') {
-                    let ts = s.clock.t + clamp(Math.round(+r.minutes || 0), 0, 1440) * MIN;
-                    const tm = /^(\d{1,2}):(\d{2})$/.exec(String(r.time || '').trim());
-                    if (tm) {
-                        const d = new Date(s.clock.t); if (r.nextDay === true) d.setDate(d.getDate() + 1);
-                        d.setHours(+tm[1], +tm[2], 0, 0);
-                        let t2 = d.getTime(); if (t2 < s.clock.t) t2 += DAY;
-                        ts = t2;
-                    } else if (r.nextDay === true && ts < nextMorning(s.clock.t) - 2 * HOUR) ts = nextMorning(s.clock.t);
-                    if (setClock(s, ts, 'ИИ по тексту')) return;
-                    return;
-                }
-            } finally { syncing = false; }
+        if (c.syncHorae) {
+            const ts = readHorae();
+            if (ts && ts >= startClock) { if (current()) setClock(s, ts, 'Horae'); return; }
         }
-        setClock(s, s.clock.t + (Number(c.stepMin) || 10) * MIN, 'шаг за сообщение');
+        if (c.syncAI) {
+            const text = String(last.mes || '').replace(/<[^>]+>/g, ' ').slice(-2500);
+            const r = await aiJSON(`Часы истории перед этим сообщением показывали: ${fmtFull(base)}.\nСообщение истории:\n${text}\n\nОпредели, сколько времени прошло в истории за это сообщение. Если в тексте явно названо время или переход («наступило утро», «через час», «в 18:00», «на следующий день») — учти это. Обычный диалог без переходов — 1–15 минут.\nФормат: {"minutes":число прошедших минут от 0 до 1440,"time":"ЧЧ:ММ если текст явно называет текущее время, иначе null","nextDay":true если явно наступил следующий день}`);
+            if (!current()) return;
+            if (r && typeof r === 'object') {
+                let ts = base + clamp(Math.round(+r.minutes || 0), 0, 1440) * MIN;
+                const tm = /^(\d{1,2}):(\d{2})$/.exec(String(r.time || '').trim());
+                if (tm && +tm[1] < 24 && +tm[2] < 60) {
+                    const d = new Date(base); if (r.nextDay === true) d.setDate(d.getDate() + 1);
+                    d.setHours(+tm[1], +tm[2], 0, 0);
+                    let t2 = d.getTime(); if (t2 < base) t2 += DAY;
+                    ts = t2;
+                } else if (r.nextDay === true && ts < nextMorning(base) - 2 * HOUR) ts = nextMorning(base);
+                if (setClock(s, ts, 'ИИ по тексту')) return;
+                return;
+            }
+        }
+        const step = Number(c.stepMin);
+        if (current()) setClock(s, base + (Number.isFinite(step) ? Math.max(0, step) : 10) * MIN, 'шаг за сообщение');
+    }
+
+    // События чата объединяются: один запрос на итоговый текст, без запросов на каждый токен.
+    const storySyncStates = new WeakMap();
+    const relationAttempts = new WeakMap();
+    let storyGenerating = false;
+    function latestStoryReply() {
+        const chat = ctx().chat || [];
+        for (let i = chat.length - 1; i >= 0; i--) {
+            const m = chat[i];
+            if (m && !m.is_system && !m.is_user && m.mes) {
+                return { message: m, index: i, id: JSON.stringify([i, m.swipe_info?.[0]?.send_date ?? m.send_date]), key: JSON.stringify([i, m.send_date, m.swipe_id, m.mes]) };
+            }
+        }
+        return null;
+    }
+    function storySyncState(s) {
+        let state = storySyncStates.get(s);
+        if (!state) {
+            state = { timer: null, running: null, pending: false, clock: false,
+                clockKey: latestStoryReply()?.key, counted: new WeakSet((ctx().chat || []).filter((m) => m && typeof m === 'object')) };
+            storySyncStates.set(s, state);
+        }
+        return state;
+    }
+    function scheduleStorySync(clock = false) {
+        updateInjection();
+        const s = S();
+        if (!s || !s.auth) return;
+        const state = storySyncState(s);
+        state.pending = true; state.clock ||= clock;
+        clearTimeout(state.timer);
+        state.timer = setTimeout(() => flushStorySync(s), 250);
+    }
+    function flushStorySync(s) {
+        const state = storySyncState(s);
+        if (state.running || storyGenerating || uniHubGenerating || S() !== s) return state.running;
+        state.running = (async () => {
+            while (state.pending && S() === s && !storyGenerating && !uniHubGenerating) {
+                state.pending = false;
+                const sourceKey = storySyncKey(), last = latestStoryReply(), clock = state.clock;
+                state.clock = false;
+                if (clock && last && state.clockKey !== last.key && gameMode(s)) {
+                    const old = s.clock.syncMessage;
+                    const base = state.replacement?.index === last.index ? state.replacement.base
+                        : old && (state.clockMessage === last.message || old.id === last.id) ? old.base : s.clock.t;
+                    state.clockMessage = last.message;
+                    s.clock.syncMessage = { id: last.id, base };
+                    await onStoryMessage(s, last.message, sourceKey, base);
+                    if (S() !== s) break;
+                    if (storySyncKey() !== sourceKey) { state.pending = true; state.clock = true; continue; }
+                    state.clockKey = last.key;
+                    state.replacement = null;
+                    save(s);
+                }
+                for (const th of s.threads) {
+                    if (S() !== s || storyGenerating || storySyncKey() !== sourceKey) { state.pending = true; break; }
+                    const key = relationSyncKey(th);
+                    if (!needsRelSync(s, th) || relationAttempts.get(th) === key) continue;
+                    relationAttempts.set(th, key);
+                    await syncRel(s, th);
+                }
+                if (S() === s && storySyncKey() !== sourceKey) state.pending = true;
+                if (S() === s) updateInjection();
+            }
+        })().catch((e) => logErr('Синхронизация с чатом', e)).finally(() => { state.running = null; });
+        return state.running;
     }
 
     /* ───────────────────────── люди из лора ───────────────────────── */
@@ -1390,10 +1478,13 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             if (pend.length) L.push(`Несданные задания: ${pend.map((t) => `«${t.title}» (${t.overdue ? 'ПРОСРОЧЕНО' : `срок ${fmtD(t.deadline)}`})`).join('; ')}.`);
         }
         if (cfg().shareDMs) {
-            const since = Date.now() - DAY;
             const ct = s.threads.find((t) => t.kind === 'char');
-            const lines = ct ? ct.msgs.filter((m) => !m.sys && m.t > since).slice(-8) : [];
-            if (lines.length) L.push(`Недавняя переписка в UniHub между ${p.name} и ${ct.name} (обоим она известна, на неё можно ссылаться в истории):\n${lines.map((m) => `${m.me ? p.name : ct.name} (${fmtT(m.gt ?? m.t)}): ${m.text}`).join('\n')}`);
+            const lines = ct ? ct.msgs.filter((m) => !m.sys).slice(-8) : [];
+            const excerpt = (th, msgs) => msgs.map((m) => `${m.me ? p.name : th.name} (${fmtT(m.gt ?? m.t)}): ${String(m.text || '').slice(0, 600)}`).join('\n');
+            if (lines.length) L.push(`Последняя переписка в UniHub между ${p.name} и ${ct.name} (обоим она известна, на неё можно ссылаться в истории; сообщения могли быть написаны раньше текущей сцены):\n${excerpt(ct, lines)}`);
+            const dms = s.threads.filter((t) => t.kind === 'dm' && t.msgs.some((m) => !m.sys))
+                .sort((a, b) => (b.t || 0) - (a.t || 0)).slice(0, 5);
+            if (dms.length) L.push(`Только для рассказчика: частные переписки UniHub с другими студентами. Их знают только участники; ${ct ? ct.name : 'другие персонажи'} не знает их содержания, пока ему не рассказали или он не увидел их. Учитывай эти факты, если участник появится в сцене; сообщения могли быть написаны раньше текущей сцены.\n${dms.map((t) => `${t.name}:\n${excerpt(t, t.msgs.filter((m) => !m.sys).slice(-4))}`).join('\n\n')}`);
         }
         // отношения: {{char}} — всегда; остальные — пометки только для рассказчика
         const ctr = s.threads.find((t) => t.kind === 'char');
@@ -1723,7 +1814,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const th = s.threads.find((t) => t.id === id);
         if (!th) return head('Диалог') + empty('Диалог не найден.');
         th.unread = 0;
-        if (needsRelSync(s, th)) setTimeout(() => syncRel(s, th).catch((e) => logErr('Отношения', e)), 0);
+        if (needsRelSync(s, th) && relationAttempts.get(th) !== relationSyncKey(th)) scheduleStorySync();
         const rl = th.relSyncing ? 'определяю отношения…' : relLabel(th), rv = Math.round(th.rel || 0);
         return `<div class="sh-ttop">${head(th.name, `${th.species && !mundane(s) ? esc(th.species) + ', ' : ''}<i class="fa-solid fa-lock"></i> зашифровано`)}
         ${th.kind === 'group' || th.kind === 'official' ? '' : `<div class="sh-rel"><div><small>${esc(rl)}${th.beef ? ' · бифф' : ''}${th.kind === 'char' && s.profile.relWithChar && rl !== 'пара' ? ' · вы пара' : ''}${relevantForSync(s, th) && !th.relSyncing ? ` <button class="sh-relsync" data-act="syncRel" data-id="${th.id}" title="${esc(th.relNote || 'Обновить по истории')}" aria-label="Обновить отношения по истории"><i class="fa-solid fa-rotate"></i></button>` : ''}</small><div class="sh-relbar"><span class="${rv < 0 ? 'neg' : ''}" style="width:${Math.abs(rv) / 2}%;${rv < 0 ? 'right:50%' : 'left:50%'}"></span></div></div>
@@ -2129,7 +2220,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.15.9 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.16.0 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2716,7 +2807,7 @@ ${story}
             ui.replyTo = '';
             render();
         },
-        syncRel: (d, el, s) => { const th = s.threads.find((t) => t.id === d.id); if (th) { th.relSyncLen = undefined; return syncRel(s, th); } },
+        syncRel: (d, el, s) => { const th = s.threads.find((t) => t.id === d.id); if (th) { th.relSyncKey = undefined; relationAttempts.delete(th); return syncRel(s, th); } },
         cLike: (d, el, s) => {
             const c = s.feed.find((x) => x.id === d.post)?.comments?.find((x) => x.id === d.id);
             if (!c) return;
@@ -3295,26 +3386,72 @@ ${story ? `Последние события истории:\n${story}\nЕсли
     }
 
     function onChatChanged() {
+        storyGenerating = false;
         ui.view = null; ui.param = null; lastKey = '';
         const s0 = S();
+        if (s0?.auth) storySyncState(s0);
         if (s0 && s0.auth && !s0.campusLoreAt) enqueue(s0, async () => { await extractCampusLore(s0); });
         if (s0 && s0.auth && !s0.genClubsAt) enqueue(s0, async () => { await genClubs(s0); });
         if (s0 && s0.auth && !s0.lorePeopleAt) enqueue(s0, async () => { const n = await extractLorePeople(s0); if (n) notify(s0, `👥 В UniHub появились студенты из вашего мира: ${n}`, 'important'); });
         tick();
         updateInjection();
         render();
+        scheduleStorySync();
+    }
+
+    function bindStoryEvents(eventSource, event_types) {
+        const on = (name, handler) => { if (event_types[name]) eventSource.on(event_types[name], handler); };
+        on('CHAT_CHANGED', onChatChanged);
+        on('CHAT_LOADED', onChatChanged);
+        on('MESSAGE_RECEIVED', (id, type) => {
+            if (type === 'quiet') return;
+            try { onStoryReply(id); } catch (e) { logErr('Доставка', e); }
+            scheduleStorySync(true);
+        });
+        on('GENERATION_STARTED', async (type, options, dryRun) => {
+            if (type === 'quiet' || dryRun) return;
+            storyGenerating = true;
+            const s = S();
+            // Уже начатая синхронизация завершается до сборки промпта основного ответа.
+            if (s?.auth) await storySyncState(s).running;
+            if (s?.auth && S() === s) {
+                const state = storySyncState(s), last = latestStoryReply(), old = s.clock.syncMessage;
+                state.replacement = type === 'regenerate' && last && !ctx().chat.at(-1)?.is_user
+                    ? { index: last.index, base: old && (state.clockMessage === last.message || old.id === last.id) ? old.base : s.clock.t }
+                    : null;
+            }
+            updateInjection();
+        });
+        const finish = () => {
+            if (uniHubGenerating) return;
+            storyGenerating = false;
+            scheduleStorySync(true);
+        };
+        on('GENERATION_ENDED', finish);
+        on('GENERATION_STOPPED', finish);
+        on('MESSAGE_DELETED', () => {
+            const s = S();
+            if (s?.auth) {
+                const state = storySyncState(s);
+                state.clockKey = latestStoryReply()?.key;
+                state.clock = false;
+            }
+            scheduleStorySync();
+        });
+        for (const name of ['MESSAGE_EDITED', 'MESSAGE_UPDATED', 'MESSAGE_SWIPED', 'MESSAGE_SWIPE_DELETED', 'CHARACTER_MESSAGE_RENDERED']) on(name, () => scheduleStorySync(true));
+        for (const name of ['MESSAGE_SENT', 'USER_MESSAGE_RENDERED', 'MORE_MESSAGES_LOADED', 'CHARACTER_EDITED']) on(name, () => scheduleStorySync());
     }
 
     function init() {
         cfg();
         mount();
         const { eventSource, event_types } = ctx();
-        eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-        if (event_types.MESSAGE_RECEIVED) eventSource.on(event_types.MESSAGE_RECEIVED, () => { try { onStoryReply(); } catch (e) { logErr('Доставка', e); } onStoryMessage().catch((e) => logErr('Часы истории', e)); });
-        if (event_types.GENERATION_STARTED) eventSource.on(event_types.GENERATION_STARTED, () => { try { updateInjection(); } catch (e) { logErr('Инъекция', e); } });
+        bindStoryEvents(eventSource, event_types);
         setInterval(() => {
             try { tick(); } catch (e) { logErr('Таймер', e); }
             updateInjection();
+            const s = S();
+            if (s?.auth) flushStorySync(s);
             if (!ui.open) return updateFab();
             if (isTyping()) {
                 const st = document.querySelector('#unihub-phone .sh-status');
