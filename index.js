@@ -323,6 +323,7 @@
         const records = [];
         const field = (object, key) => { if (object && typeof object[key] === 'string' && object[key].trim()) records.push([object, key]); };
         for (const p of s.lorePeople || []) field(p, 'name');
+        for (const p of s.peopleVoices || []) field(p, 'name');
         for (const p of s.feed || []) { if (!p.mine) field(p, 'author'); for (const c of p.comments || []) { if (!c.mine) field(c, 'author'); field(c, 'replyTo'); } }
         for (const th of s.threads || []) if (privateThread(th)) { field(th, 'name'); for (const m of th.msgs || []) field(m, 'from'); }
         for (const p of [...(s.dating?.profiles || []), ...(s.dating?.matches || [])]) field(p, 'name');
@@ -377,9 +378,10 @@
         for (const p of s.lorePeople || []) {
             const key = personKey(p.name), old = lore.get(key);
             if (!old) lore.set(key, p);
-            else { old.aliases = [...new Set([...(old.aliases || []), ...(p.aliases || [])])]; for (const k of ['bio','species','faculty','abilities','relation']) if (!old[k] && p[k]) old[k] = p[k]; }
+            else { old.aliases = [...new Set([...(old.aliases || []), ...(p.aliases || [])])]; for (const k of ['bio','species','faculty','abilities','relation','speech','temperament']) if (!old[k] && p[k]) old[k] = p[k]; }
         }
         s.lorePeople = [...lore.values()];
+        if (s.peopleVoices) s.peopleVoices = [...new Map(s.peopleVoices.map(p=>[personKey(p.name),p])).values()];
         for (const key of ['profiles', 'matches']) if (s.dating?.[key]) s.dating[key] = [...new Map(s.dating[key].map(p => [personKey(p.name), p])).values()];
         if (s.messenger?.presence) {
             const presence = {};
@@ -658,7 +660,7 @@
         return '';
     }
     /** Записи лорбука, чьи ключи встречаются в тексте, плюс постоянные записи. */
-    async function loreFor(text) {
+    async function loreFor(text, maxChars = 3000) {
         const c = ctx();
         const ch = c.characters?.[c.characterId];
         const books = new Set();
@@ -678,7 +680,8 @@
             } catch (e) { logErr('Лорбук', e); }
         }
         for (const e of ch?.data?.character_book?.entries || []) take(e.keys, e.content, e.constant, e.enabled === false);
-        return out.join('\n---\n').slice(0, 3000);
+        const result = out.join('\n---\n');
+        return maxChars === null ? result : result.slice(0, maxChars);
     }
     function charInfo() {
         const c = ctx();
@@ -1048,13 +1051,16 @@ task — если назначена письменная отработка; ap
         enqueue(s, async () => {
             const who = personName(s, h.from || h.author) || 'Аноним';
             const sp = String(h.species || '').slice(0, 40);
-            const base = `${world(s)}\n\nЗадание ${s.profile.name}: «${q.t}» — ${q.desc}\nЗамысел продолжения: ${h.intent || h.text || ''}\nПоводом стало действие ${s.profile.name}: ${act}${detail ? ` — «${String(detail).slice(0, 300)}»` : ''}.`;
+            const voices = h.type === 'post' ? await voiceContext(s,[who]) : '';
+            if (S() !== s) return;
+            const base = `${world(s,h.type !== 'post')}${voices ? `\n\n${voices}` : ''}\n\nЗадание ${s.profile.name}: «${q.t}» — ${q.desc}\nЗамысел продолжения: ${h.intent || h.text || ''}\nПоводом стало действие ${s.profile.name}: ${act}${detail ? ` — «${String(detail).slice(0, 300)}»` : ''}.`;
             if (h.type === 'dm') {
                 let th = s.threads.find((t) => privateThread(t) && samePerson(s, t.name, who));
                 if (!th) { th = { id: uid(), name: who, species: sp, bio: String(h.intent || '').slice(0, 200), kind: 'dm', msgs: [], t: Date.now(), unread: 0, rel: 0 }; s.threads.unshift(th); }
                 if (!th.pendingReply) queueMessengerReply(s, th, { initiate: `${base}\n${who} пишет первым(ой), откликаясь именно на описанное действие. Не приписывай пользователю других действий.` });
             } else if (h.type === 'post') {
-                const txt = await aiText(`${base}\n\nТеперь ${who}${sp ? ` (${sp})` : ''} публикует пост в ленте UniHub, откликаясь на это. До 280 символов, живо, по-русски, только текст поста.`);
+                const txt = await aiText(`${base}\n\nТеперь ${who}${sp ? ` (${sp})` : ''} может опубликовать пост в ленте UniHub, откликаясь на это в собственной манере. Если публикация не в его характере — пустая строка. До 280 символов, по-русски, только текст поста.`);
+                if (S() !== s) return;
                 if (!txt) return;
                 s.feed.unshift({ id: uid(), author: who, species: sp, channel: 'general', text: cleanMsg(txt).slice(0, 500), likes: 5 + Math.floor(Math.random() * 60), t: Date.now(), comments: [] });
                 notify(s, `📰 ${who} опубликовал(а) пост — кажется, это про вас`, 'important', { view: 'post', param: s.feed[0]?.id });
@@ -1153,7 +1159,11 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         so.followers -= lost;
         notify(s, `🚫 Вас «отменили» в UniHub! −${kfmt(lost)} подписчиков, охваты рухнули на сутки.`, 'bad');
         enqueue(s, async () => {
-            const r = await aiJSON(`${world(s)}\n\nСтуденты UniHub устроили травлю ${s.profile.name} за спорные посты и комментарии. Сгенерируй 2 поста разных студентов об этой «отмене»: возмущение, мемы, кто-то заступается. Всё на русском.\nФормат: [{"author":"","species":"","text":"до 250 символов"}]`);
+            const voices = await voiceContext(s);
+            if (S() !== s) return;
+            const r = await aiJSON(`${world(s,false)}\n\n${voices}\n\nВ UniHub обсуждают «отмену» ${s.profile.name} за спорные посты и комментарии. Сгенерируй до 2 постов разных студентов: позиция и манера каждого зависят от его характера, ценностей и отношений, а не от общего настроения толпы. Не заставляй всех травить пользователя или шутить мемами; кто-то может заступиться или не участвовать. Всё на русском.\n${NEW_VOICE_RULE}\nФормат: [{"author":"","species":"","text":"до 250 символов","voice":null}]`);
+            if (S() !== s) return;
+            rememberVoices(s,Array.isArray(r) ? r.filter(Boolean) : []);
             for (const x of Array.isArray(r) ? r : []) if (x && x.author && x.text) s.feed.unshift({ id: uid(), author: personName(s, x.author), species: SP(s, x.species), channel: 'general', text: cleanMsg(x.text).slice(0, 500), likes: 50 + Math.floor(Math.random() * 500), t: Date.now(), comments: [], story: `Отмена ${s.profile.name}` });
         });
     }
@@ -1213,7 +1223,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             soc(s).hate = clamp(soc(s).hate + 10, 0, 100);
             notify(s, `⚔️ Бифф с ${th.name}! Конфликт выплеснулся в ленту.`, 'warn', { view: 'thread', param: th.id });
             enqueue(s, async () => {
-                const x = await aiJSON(`${world(s)}\n\n${th.name}${th.species ? ` (${th.species})` : ''} поссорился(ась) с ${s.profile.name} в личке и выносит конфликт в ленту UniHub: язвительный пост-наезд или прозрачный намёк. Последние сообщения:\n${th.msgs.slice(-6).map((m) => `${m.me ? s.profile.name : th.name}: ${m.text}`).join('\n')}\nФормат: {"text":"до 280 символов","media":"пусто или описание скриншота переписки"}`);
+                const voices = await voiceContext(s,[th.name]);
+                if (S() !== s) return;
+                const x = await aiJSON(`${world(s,false)}\n\n${voices}\n\n${th.name}${th.species ? ` (${th.species})` : ''} поссорился(ась) с ${s.profile.name} в личке. Реши, станет ли он обсуждать конфликт в ленте UniHub и каким будет пост, по его характеру и границам. Не навязывай язвительность, агрессию или разглашение переписки; если публичный пост неуместен — text пустой. Последние сообщения:\n${th.msgs.slice(-6).map((m) => `${m.me ? s.profile.name : th.name}: ${m.text}`).join('\n')}\nФормат: {"text":"до 280 символов либо пусто","media":"пусто или описание скриншота переписки, только если это соответствует его границам"}`);
+                if (S() !== s) return;
                 if (x?.text) s.feed.unshift({ id: uid(), author: th.name, species: th.species || '', channel: 'general', text: cleanMsg(x.text).slice(0, 500), media: String(x.media || '').slice(0, 200), kind: 'photo', likes: 30 + Math.floor(Math.random() * 300), t: Date.now(), comments: [], story: `Бифф: ${th.name} против ${s.profile.name}` });
             });
         }
@@ -1760,6 +1773,63 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
         const matches = (s.lorePeople || []).filter(p => samePerson(s,p.name,n));
         return matches.length === 1 ? matches[0] : null;
     }
+    const VOICE_RULE = `Правила характера и речи — обязательны для каждого автора отдельно.
+Текущая полная карточка и полные связанные записи лора важнее старой краткой биографии, сохранённого описания манеры и сгенерированных реплик, если они противоречат источнику. Карточка и относящийся к этому человеку лор задают его характер, ценности, границы, словарь, длину фраз, юмор, степень формальности и способ выражать чувства. Не переносить манеру {{char}} на NPC или одного NPC на другого. Текущие отношения и события меняют реакцию, но не заменяют личность шаблоном «дружелюбный пользователь соцсети».
+Эмодзи и сленг используй ТОЛЬКО если это соответствует карточке, лору или сохранённому описанию манеры конкретного автора. Эмодзи в старом сгенерированном комментарии сами по себе не подтверждают, что это в его характере. При отсутствии таких оснований — без эмодзи и сленга, нейтральная речь. Не навязывай шутки, фамильярность, флирт, грубость или поддержку всем подряд. Сдержанный остаётся сдержанным, официальный — официальным; близость не делает всех одинаково ласковыми.
+Формат соцсети и краткость не важнее характера. Публичные посты и комментарии учитывают личные границы: не раскрывай тайны и интимные детали только потому, что они есть в карточке или личке. Персонаж знает лишь доступные ему события, а не все чужие переписки. Если публикация или ответ не в его характере либо момент неподходящий, он может промолчать; не выдумывай реплику ради обязательного участия.
+Перед выводом проверь каждого автора по его собственным данным и исправь чужую манеру, необоснованные эмодзи и сленг. Эта проверка остаётся внутренней: возвращай только запрошенный результат.`;
+    const NEW_VOICE_RULE = `Для придуманного NPC без лора и сохранённого профиля манеры добавь voice: {"traits":"устойчивые черты и ценности","speech":"индивидуальная манера речи; допустимы ли эмодзи и сленг"}. Если у него уже есть описание или реплики, профиль должен им соответствовать. Не создавай и не меняй voice для основного персонажа, людей из лора и NPC с уже сохранённым профилем манеры. Текст автора должен соответствовать его voice; отсутствие эмодзи и сленга — исходный вариант, если нет причины для них.`;
+    function rememberVoices(s, records) {
+        s.peopleVoices ||= [];
+        for (const r of records) {
+            const name = personName(s,r.author), v = r.voice;
+            if (!name || !v || typeof v !== 'object' || Array.isArray(v) || samePerson(s,name,s.profile.name)
+                || (!ctx().groupId && samePerson(s,name,ctx().name2)) || lorePerson(s,name)
+                || s.peopleVoices.some(p=>samePerson(s,p.name,name))) continue;
+            const traits = typeof v.traits === 'string' ? cleanMsg(v.traits) : '', speech = typeof v.speech === 'string' ? cleanMsg(v.speech) : '';
+            if (traits || speech) s.peopleVoices.push({ name, traits, speech });
+        }
+    }
+    /** Канон и сохранённая манера участников: один и тот же человек во всех разделах. */
+    async function voiceContext(s, requested = [], includeMain = true) {
+        const c = ctx(), main = !c.groupId && c.name2, names = new Map();
+        const add = n => { n = personName(s,n); if (n && !samePerson(s,n,s.profile.name)) names.set(personKey(n),n); };
+        for (const n of requested) add(n);
+        if (includeMain) {
+            for (const p of lorePeople(s).slice(0,10)) add(p.name);
+            for (const p of s.peopleVoices || []) add(p.name);
+            for (const p of s.feed.filter(p=>!p.mine).slice(0,12)) add(p.author);
+            for (const p of s.dating?.matches || []) add(p.name);
+        }
+        const parts = [VOICE_RULE];
+        if (includeMain && main) { parts.push(charCard()); add(main); }
+        const aliases = [];
+        for (const name of names.values()) {
+            const identity = (s.peopleIdentities || []).find(p=>samePerson(s,p.name,name));
+            aliases.push(name,...(identity?.aliases || []));
+            const lp = lorePerson(s,name), th = s.threads.find(t=>privateThread(t) && samePerson(s,t.name,name));
+            const profile = [...(s.dating?.matches || []),...(s.dating?.profiles || [])].find(p=>samePerson(s,p.name,name));
+            const v = (s.peopleVoices || []).find(p=>samePerson(s,p.name,name));
+            const facts = [];
+            if (lp) facts.push(`Из лора: ${lp.bio || ''}${lp.temperament ? `\nХарактер: ${lp.temperament}` : ''}${lp.speech ? `\nРечь: ${lp.speech}` : ''}${lp.relation ? `\nСвязь с ${c.name2}: ${lp.relation}` : ''}`);
+            if (th?.bio) facts.push(`Описание собеседника: ${th.bio}`);
+            if (profile?.bio) facts.push(`Анкета: ${profile.bio}`);
+            if (v && !lp && !(main && samePerson(s,name,main))) facts.push(`Сохранённый характер придуманного NPC: ${v.traits}\nСохранённая речь: ${v.speech}`);
+            if (th && (th.known !== undefined || th.relSyncKey || th.pair !== undefined || th.conflict || th.msgs.some(m=>!m.sys))) facts.push(`Отношения с ${s.profile.name}: ${relLabel(th)}${th.relNote ? `. ${th.relNote}` : ''}${th.conflict ? `. Ссора: ${th.conflict.why}` : ''}`);
+            else if (main && samePerson(s,name,main)) facts.push(s.profile.relWithChar ? `В романтических отношениях с ${s.profile.name}.` : 'Статус ещё не проверен: исходные отношения бери из карточки, не считай их незнакомыми из-за пустой переписки.');
+            const samples = [];
+            for (const p of s.feed) {
+                if (!p.mine && samePerson(s,p.author,name)) samples.push(p.text || '');
+                for (const m of p.comments || []) if (!m.mine && samePerson(s,m.author,name)) samples.push(m.text || '');
+            }
+            if (th) samples.push(...th.msgs.filter(m=>!m.me && !m.sys).slice(-3).map(m=>m.text));
+            if (samples.length) facts.push(`Предыдущие собственные реплики (ориентир постоянства, не повторять и не ставить выше канона):\n${samples.slice(-5).join('\n')}`);
+            if (facts.length) parts.push(`${name}:\n${facts.join('\n')}`);
+        }
+        if (aliases.length) { const lore = await loreFor(aliases.join('\n'),null); if (lore) parts.push(`Полные связанные записи лора. Применяй каждую к тому человеку, о котором она написана, а не ко всем авторам:\n${lore}`); }
+        if (includeMain) { const story = recentStory(10); if (story) parts.push(`Последние события истории (не означают, что каждый NPC был их свидетелем):\n${story}`); }
+        return parts.join('\n\n');
+    }
     /** Находит в лорбуке и карточке студентов и сотрудников университета, отсекая родных и посторонних. */
     async function extractLorePeople(s) {
         const c = ctx();
@@ -1770,13 +1840,14 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
 - "staff" — преподаватель или сотрудник университета;
 - "other" — все остальные: родители, опекуны, бабушки и дедушки, старшие родственники ${c.name2} и любых других персонажей, горожане, люди вне университета, дети.
 Родители и старшая родня — ВСЕГДА "other", даже если связаны с университетом.
-Для одного персонажа используй одно полное имя. aliases — другие написания того же полного имени на русском или английском; не включай людей с другим именем или фамилией.\nФормат: [{"name":"имя как в лоре","aliases":[],"species":"вид по-русски","role":"student","faculty":"","year":2,"abilities":"","bio":"характер и важное, 1–2 предложения","relation":"кем приходится ${c.name2}"}]. Если никого нет — пустой массив.`);
+Для одного персонажа используй одно полное имя. aliases — другие написания того же полного имени на русском или английском; не включай людей с другим именем или фамилией. temperament и speech выпиши только из данных карточки и лора: ценности и устойчивые черты, формальность, юмор, словарь, отношение к эмодзи и сленгу. Если манера не описана — пусто, не придумывай её известному NPC.\nФормат: [{"name":"имя как в лоре","aliases":[],"species":"вид по-русски","role":"student","faculty":"","year":2,"abilities":"","bio":"характер и важное, 1–2 предложения","temperament":"характер и ценности из источника","speech":"манера речи из источника","relation":"кем приходится ${c.name2}"}]. Если никого нет — пустой массив.`);
         if (S() !== s) return 0;
         const list = (Array.isArray(r) ? r : []).filter((p) => p && p.name).map((p) => ({
             name: cleanName(p.name).slice(0, 50), aliases: (Array.isArray(p.aliases) ? p.aliases : []).map(cleanName).filter(n => personKey(n) === personKey(p.name)).slice(0, 8), species: cleanMsg(p.species || '').slice(0, 40),
             role: p.role === 'student' || p.role === 'staff' ? p.role : 'other',
             faculty: cleanMsg(p.faculty || '').slice(0, 60), year: clamp(parseInt(p.year, 10) || 0, 0, MAX_YEAR),
             abilities: cleanMsg(p.abilities || '').slice(0, 120), bio: cleanMsg(p.bio || '').slice(0, 300), relation: cleanMsg(p.relation || '').slice(0, 80),
+            temperament: typeof p.temperament === 'string' ? cleanMsg(p.temperament) : '', speech: typeof p.speech === 'string' ? cleanMsg(p.speech) : '',
         })).filter((p) => p.role !== 'other' && !FAMILY_RE.test(p.relation) && !samePerson(s,p.name,c.name2) && !samePerson(s,p.name,s.profile.name));
         s.lorePeople = list.slice(0, 30);
         s.lorePeopleAt = Date.now();
@@ -2602,7 +2673,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.17.4 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.17.5 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2926,6 +2997,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             }
             if (th.kind !== 'group') extra += `\n\nЭТО ЛИЧНАЯ ПЕРЕПИСКА только между ${th.name} и ${s.profile.name}: её никто больше не видит. Не обращайся в ней к третьим лицам («Майкл, скажи спасибо…», «@Келлер»), не пиши так, будто это комментарии или общий чат, — о других говори в третьем лице («скажу Майклу», «Майкл пусть спасибо скажет»). Комментарии в ленте — отдельное место.`;
             if (th.kind !== 'group') extra += `\n\nПРАВИЛО ПРИСУТСТВИЯ: кто по текущей сцене находится рядом с ${s.profile.name} (в одном помещении, в одной машине, за одним столом), общается с ней/ним вслух. Никогда не проси ${s.profile.name} «передать», «сказать» или «попросить» того, кто сейчас рядом с ней/ним, — ты бы сказал(а) это сам(а) или написал(а) этому человеку напрямую. Если ты сам(а) — ${th.name} — сейчас рядом с ${s.profile.name}, ты не пишешь в мессенджер: верни reply пустой строкой "". Общение вслух остаётся в основном чате.`;
+            if (th.kind === 'dm') extra += `\n\n${await voiceContext(s,[th.name],false)}`;
             const who = th.kind === 'group'
                 ? `участников учебной группы «${th.name}» (${th.bio}). Пиши от лица одного из участников в формате "Имя: текст".`
                 : th.kind === 'char'
@@ -2934,7 +3006,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             const relTxt = th.kind === 'group' ? '' : `\nОтношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100, шкала от −100 вражда до 100 близость).${th.relNote ? ` ${th.relNote}` : ''}${relLabel(th) === 'не знакомы' ? ` Они не знакомы — ${th.name} пишет как незнакомому человеку.` : ''}${th.kind === 'char' && s.profile.relWithChar ? ` ${th.name} и ${s.profile.name} — пара.` : ''}${jealousNote(s, th)}`;
             if (S() !== s || (opts.valid && !opts.valid())) return { stale: true };
             if (sceneContactState(s, th) !== 'apart') return { sceneBlocked: sceneContactState(s, th) };
-            const raw = await aiRaw(`${world(s, th.kind !== 'char')}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist || '(переписки ещё не было)'}\n\n${opts.initiate ? `${opts.initiate}\n\n` : ''}Напиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date(NOW()).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(NOW())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
+            const raw = await aiRaw(`${world(s, th.kind !== 'char')}${extra}${relTxt}\n\n${th.kind === 'dm' ? '' : VOICE_RULE}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist || '(переписки ещё не было)'}\n\n${opts.initiate ? `${opts.initiate}\n\n` : ''}Напиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date(NOW()).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(NOW())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
             if (S() !== s || (opts.valid && !opts.valid())) return { stale: true };
             if (sceneContactState(s, th) !== 'apart') return { sceneBlocked: sceneContactState(s, th) };
             const js = th.kind === 'group' ? null : parseJSON(raw);
@@ -2963,12 +3035,15 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     /** Может ли {{char}} прокомментировать — с учётом ваших отношений. */
     function charCommentRule(s) {
         const c = ctx().name2, ct = s.threads.find((t) => t.kind === 'char');
-        const rel = ct ? relLabel(ct) : 'неизвестно';
+        const rel = ct && (ct.known !== undefined || ct.relSyncKey || ct.msgs.some(m=>!m.sys)) ? relLabel(ct) : s.profile.relWithChar ? 'пара' : 'ещё не проверены; исходные отношения бери из карточки';
         const quarrel = ct?.conflict ? ` Сейчас они в ссоре: ${ct.conflict.why}.` : '';
-        return `\n${c} (персонаж основной истории) МОЖЕТ оставить комментарий, но не обязан. Его отношения с ${s.profile.name}: ${rel}.${quarrel} Реши по его характеру и этим отношениям: близкий или влюблённый поддержит; враг съязвит, поддразнит или демонстративно промолчит; в ссоре — промолчит, ответит холодно или колко; незнакомец обычно не комментирует. Если молчание уместнее — не включай его. Не противоречь текущей сцене.`;
+        return `\n${c} (персонаж основной истории) МОЖЕТ оставить комментарий, но не обязан. Его отношения с ${s.profile.name}: ${rel}.${quarrel} Реши по его собственной карточке, манере речи, границам и текущей сцене, уместно ли отвечать и как. Романтические отношения не обязывают поддерживать каждый пост или флиртовать публично; ссора не обязывает грубить, если это не в характере. Если молчание уместнее — не включай его. Не противоречь текущей сцене.`;
     }
     const postText = (p) => `${p.text || ''}${p.media ? ` [${p.kind === 'video' ? 'видео' : 'фото'}: ${p.media}]` : ''}`;
     async function aiComments(s, p, task, scoreWhat) {
+        const authors = [p.author,...(p.comments || []).flatMap(c=>[c.author,c.replyTo]),...(p.story ? s.stories.find(st=>st.title===p.story)?.cast || [] : [])];
+        const voices = await voiceContext(s,authors);
+        if (S() !== s) return [];
         const prev = shownComments(p).slice(-12).map((c) => `${c.author}${c.replyTo ? ` → ${c.replyTo}` : ''}: ${c.text}`).join('\n');
         const st = p.story ? s.stories.find((x) => x.title === p.story) : null;
         const ctxLines = [
@@ -2976,8 +3051,10 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             p.mine && cancelled(s) ? `Сейчас ${s.profile.name} «отменяют» в сети: большинство комментаторов настроены враждебно, лишь пара человек заступается.` : '',
         ].filter(Boolean).join('\n');
         const scoreFmt = scoreWhat ? `\nТакже оцени ${scoreWhat} ${s.profile.name}: authority (−5…5 — насколько это подняло авторитет ${s.profile.name}: остроумие, смелость, поддержка, интересная мысль — плюс; грубость, кринж, глупость — минус), controversy (0…10 — насколько спорно или токсично), sentiment (positive, mixed или negative — как восприняло сообщество). Реакция комментаторов должна соответствовать оценке.\nЕсли кто-то из комментаторов пообещал написать ${s.profile.name} в личку, начал договариваться с ней/ним о встрече или явно хочет продолжить разговор наедине — заполни followup: {"from":"имя этого комментатора","is_char":true если это ${ctx().name2} — персонаж основной истории, иначе false,"intent":"что он(а) напишет в личке — например, уточнит день, время и место встречи"}. Иначе followup: null.` : '';
-        const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${postText(p)}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}${loreStudentsLine(s, 8)}${ctx().name2 && !ctx().groupId && (p.mine || Math.random() < 0.4) ? charCommentRule(s) : ''}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное. Адресата ответа указывай только в replyTo; text начинается сразу с реплики, без @упоминания и повторного имени адресата.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
+        const r = await aiJSON(`${world(s, false)}\n\n${voices}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${postText(p)}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}${loreStudentsLine(s, 8)}${ctx().name2 && !ctx().groupId ? charCommentRule(s) : ''}\n${task}\nКомментарии короткие, но степень эмоциональности и манера — индивидуальные, строго по данным каждого автора. Оценка сообщества не меняет характер конкретного человека. Всё на русском, виды тоже на русском. Не повторяй уже написанное. Адресата ответа указывай только в replyTo; text начинается сразу с реплики, без @упоминания и повторного имени адресата.${scoreFmt}\n${NEW_VOICE_RULE}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3,"voice":null}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
         const arr = Array.isArray(r) ? r : (Array.isArray(r?.comments) ? r.comments : []);
+        if (S() !== s) return [];
+        rememberVoices(s,arr.filter(Boolean));
         const list = arr.filter((c) => c && c.author && c.text && cleanName(c.author) !== s.profile.name).slice(0, 8).map((c) => ({
             id: uid(), author: personName(s, c.author), species: SP(s, c.species), text: stripMention(cleanMsg(c.text), cleanName(c.replyTo)).slice(0, 400),
             replyTo: personName(s, c.replyTo), likes: Math.max(0, parseInt(c.likes, 10) || 0), liked: false,
@@ -3173,7 +3250,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             if (replyTo) questEvent(s, 'reply', 1, '', detail, event);
             p.loadingComments = true; save(s); render();
             const target = replyTo || (p.mine ? '' : p.author);
-            const list = await aiComments(s, p, `${s.profile.name} только что написал(а) комментарий${replyTo ? ` в ответ ${replyTo}` : ''}: «${text}». Сгенерируй 1–3 ответа в ветке. ${target ? `${target} обязательно отвечает ${s.profile.name} (replyTo: "${s.profile.name}"). ` : 'Ответь от лица других студентов. '}Может подключиться ещё кто-то из комментаторов или новый студент.`, 'этот комментарий');
+            const list = await aiComments(s, p, `${s.profile.name} только что написал(а) комментарий${replyTo ? ` в ответ ${replyTo}` : ''}: «${text}». Сгенерируй 1–3 ответа в ветке. ${target ? `${target} может ответить ${s.profile.name} (replyTo: "${s.profile.name}"), если это соответствует характеру и текущему моменту; не принуждай к ответу, допустим пустой список. ` : 'Ответь от лица других студентов. '}Может подключиться ещё кто-то из комментаторов или новый студент.`, 'этот комментарий');
             p.loadingComments = false;
             applyScore(s, list.score, null);
             const fu = list.followup || guessFollowup(s, p, text, replyTo, list);
@@ -3414,13 +3491,18 @@ ${story}
             const act = s.stories.filter((x) => now - x.updated < 5 * DAY).slice(-4);
             const storyTxt = act.map((x) => `- «${x.title}» (участники: ${x.cast.join(', ')}): ${x.summary}${x.userActs?.length ? ` Вмешательство ${name}: ${x.userActs.slice(-3).join(' | ')}` : ''}`).join('\n');
             const rels = s.threads.filter((t) => t.kind !== 'group' && (Math.abs(t.rel || 0) >= 40 || (t.flirt || 0) >= 3)).slice(0, 6).map((t) => `${t.name} — ${relLabel(t)}`).join('; ');
-            const r = await aiJSON(`${world(s)}\n\nСгенерируй 6 свежих публикаций в ленту UniHub от разных студентов разных видов.${loreStudentsLine(s)} Весь текст на русском, включая названия видов (имена могут быть любыми). Каналы: general, study, clubs, dorms, species.${s.profile.species ? ` Минимум 1 пост от вида «${s.profile.species}» в канал species.` : ''}
+            const voices = await voiceContext(s,act.flatMap(st=>st.cast || []));
+            if (S() !== s) return;
+            const r = await aiJSON(`${world(s, false)}\n\n${voices}\n\nСгенерируй 6 свежих публикаций в ленту UniHub от разных студентов разных видов.${loreStudentsLine(s)} Весь текст на русском, включая названия видов (имена могут быть любыми). Каналы: general, study, clubs, dorms, species.${s.profile.species ? ` Минимум 1 пост от вида «${s.profile.species}» в канал species.` : ''}
 Лента живая: студенты общаются МЕЖДУ СОБОЙ. 3–4 поста — сюжетные линии: продолжение активных сюжетов (ссоры, романы, соперничество, розыгрыши, расследования, сплетни) или начало нового. Участники отвечают друг другу постами и упоминают друг друга через @Имя, сюжет развивается от ленты к ленте. Персонажи сюжетов реагируют на вмешательство ${name}.
 ${storyTxt ? `Активные сюжеты:\n${storyTxt}\n` : ''}${rels ? `Отношения ${name} в UniHub (могут всплывать в ленте — биффы, флирт, сплетни): ${rels}\n` : ''}${cancelled(s) ? `Сейчас ${name} «отменяют» в сети — это активно обсуждают.\n` : ''}1–2 поста могут обсуждать ${name}: реакцию на вид и способности по правилам выше.
-${ctx().name2 && !ctx().groupId ? `Ровно 1 пост из 6 — от ${ctx().name2} (персонаж основной истории): в его характере и манере, о том, что он мог бы написать прямо сейчас — с учётом событий истории и не противореча текущей сцене. Подпись — как он представился бы в соцсети (имя, можно с фамилией).` : ''}
-Формат: {"posts":[{"author":"Имя","species":"вид","channel":"general","text":"до 300 символов","media":"описание фото или видео, либо пустая строка","kind":"photo|video|reel|story","likes":12,"verified":true,"story":"название сюжета или пустая строка"}],"stories":[{"title":"название сюжета","cast":["Имя","Имя"],"summary":"что происходит сейчас, 1–2 предложения"}]}`);
+${ctx().name2 && !ctx().groupId ? `Не более 1 поста из 6 — от ${ctx().name2} (персонаж основной истории): в его характере и манере, о том, что он мог бы написать прямо сейчас — с учётом событий истории и не противореча текущей сцене. Если он не стал бы публиковать это по характеру, границам или текущей сцене — не включай его; выбери другого автора. Подпись — как он представился бы в соцсети (имя, можно с фамилией).` : ''}
+${NEW_VOICE_RULE}
+Формат: {"posts":[{"author":"Имя","species":"вид","channel":"general","text":"до 300 символов","media":"описание фото или видео, либо пустая строка","kind":"photo|video|reel|story","likes":12,"verified":true,"story":"название сюжета или пустая строка","voice":null}],"stories":[{"title":"название сюжета","cast":["Имя","Имя"],"summary":"что происходит сейчас, 1–2 предложения"}]}`);
+            if (S() !== s) return;
             const arr = Array.isArray(r) ? r : (Array.isArray(r?.posts) ? r.posts : []);
             if (!arr.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
+            rememberVoices(s,arr.filter(Boolean));
             for (const st of Array.isArray(r?.stories) ? r.stories : []) {
                 if (!st || !st.title) continue;
                 const title = cleanName(st.title).slice(0, 60);

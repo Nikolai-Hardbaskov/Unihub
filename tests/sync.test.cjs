@@ -35,7 +35,7 @@ function app() {
         scheduleStorySync, flushStorySync, onStoryReply, buildInjection, bindStoryEvents,
         setClock, aiRaw, onChatChanged, readHorae, parseStoryTime, syncHoraeClock, pollHoraeClock,
         readChatClock, guessedStoryClock, hasStoryProgress, refreshQuests, makeQuest, questEvent, fireHook, stripMention, commentHTML, aiComments, ACT, ui, questHTML, questScopeReady, drainQueue: () => queue,
-        queueMessengerReply, tickMessenger, presenceFor, applyPresence, planInitiative, presenceDot, chatsTab, threadView, messengerState, startDM, sceneContactKey, sceneContactState, checkSceneContact, reply, startMeeting, personKey, personName, samePerson, normaliseIdentities, lorePerson, openThread, feedTab, personView, scheduleDM, looksLikeChar,
+        queueMessengerReply, tickMessenger, presenceFor, applyPresence, planInitiative, presenceDot, chatsTab, threadView, messengerState, startDM, sceneContactKey, sceneContactState, checkSceneContact, reply, startMeeting, personKey, personName, samePerson, normaliseIdentities, lorePerson, openThread, feedTab, personView, scheduleDM, looksLikeChar, voiceContext, rememberVoices, extractLorePeople, updateRel, cancelUser,
         setGenerating: value => { storyGenerating = value; }, getGenerating: () => storyGenerating };
     `;
     vm.runInNewContext(source.replace('    globalThis.UniHub =', exposed + '\n    globalThis.UniHub ='), box);
@@ -54,6 +54,103 @@ function app() {
         add: (mes, is_user = false) => { context.chat.push({ name: is_user ? 'Студент' : 'Алекс', mes, is_user, send_date: 'm' + context.chat.length }); return context.chat.length - 1; },
     };
 }
+test('comments always get full character speech examples and conditional style, irrespective of random participation', async () => {
+    const a=app(); a.setRandom(0.99); const example='A'.repeat(7000)+' SHORT-FORMAL-SPEECH';
+    a.context.characters[0]={data:{description:'Reserved.',personality:'Restrained. No slang.',scenario:'Works.',mes_example:'<START>'+example}};
+    a.answer(prompt=>{
+        assert.ok(prompt.includes(example)); assert.equal(prompt.split('SHORT-FORMAL-SPEECH').length-1,1);
+        assert.match(prompt,/Эмодзи и сленг используй ТОЛЬКО/); assert.match(prompt,/без эмодзи и сленга, нейтральная речь/);
+        assert.match(prompt,/Алекс \(персонаж основной истории\) МОЖЕТ оставить комментарий/);
+        assert.doesNotMatch(prompt,/коротко, эмоционально, с эмодзи и сленгом/);
+        return [];
+    });
+    await a.api.aiComments(a.s,{author:'Катя',text:'Пост',comments:[]},'Ответь'); assert.equal(a.calls.length,1);
+});
+test('feed posts include primary speech examples and individually sourced NPC manner', async () => {
+    const a=app(); a.context.characters[0].mes_example='{{char}}: Принято. До встречи.';
+    a.s.lorePeople=[{name:'Катя',role:'student',bio:'Сдержанная',temperament:'Ценит точность',speech:'Официально, без эмодзи'}];
+    a.answer(prompt=>{
+        assert.match(prompt,/Алекс: Принято\. До встречи\./); assert.match(prompt,/Ценит точность/); assert.match(prompt,/Официально, без эмодзи/);
+        assert.match(prompt,/Не более 1 поста/); assert.doesNotMatch(prompt,/Ровно 1 пост/);
+        return {posts:[{author:'Катя',text:'Встреча состоится завтра.',voice:{traits:'Чужой характер',speech:'Мемы'}}]};
+    });
+    await a.api.ACT.genFeed({},null,a.s); assert.equal(a.s.feed[0].author,'Катя'); assert.equal(a.s.peopleVoices.length,0);
+});
+test('targeted NPC outside the first lore slots gets complete matching raw lore including its tail', async () => {
+    const a=app(), lore='NPC details. '.repeat(1000)+' Ольга говорит официально и никогда не использует эмодзи.';
+    a.context.characters[0].data={extensions:{world:'People'}};
+    a.context.loadWorldInfo=async()=>({entries:{npc:{key:['Ольга'],content:lore}}});
+    a.s.lorePeople=Array.from({length:15},(_,i)=>({name:'NPC '+i,role:'student',bio:'Other'}));
+    a.s.lorePeople.push({name:'Ольга',role:'student',bio:'Сдержанная',speech:'Не использует сленг'});
+    a.answer(prompt=>{assert.ok(prompt.includes(lore)); assert.match(prompt,/Речь: Не использует сленг/); return [{author:'Ольга',text:'Принято.'}];});
+    await a.api.aiComments(a.s,{author:'Ольга',text:'Пост',comments:[]},'Ответь'); assert.equal(a.calls.length,1);
+});
+test('invented NPC has one saved voice across feed, replies, private chat and reload', async () => {
+    const a=messengerApp();
+    a.answer(()=>({posts:[{author:'Новый NPC',text:'Принято.',voice:{traits:'Сдержанный, ценит точность',speech:'Кратко и официально, без эмодзи и сленга'}}]}));
+    await a.api.ACT.genFeed({},null,a.s); assert.equal(a.s.peopleVoices.length,1);
+    a.answer(prompt=>{assert.match(prompt,/Сохранённая речь: Кратко и официально, без эмодзи и сленга/); return {posts:[{author:'Новый NPC',text:'Хорошо.',voice:{traits:'Другой характер',speech:'Сленг'}}]};});
+    await a.api.ACT.genFeed({},null,a.s); assert.equal(a.s.peopleVoices[0].speech,'Кратко и официально, без эмодзи и сленга');
+    a.answer(prompt=>{
+        assert.match(prompt,/Сохранённый характер придуманного NPC: Сдержанный, ценит точность/);
+        assert.match(prompt,/Сохранённая речь: Кратко и официально, без эмодзи и сленга/);
+        return [{author:'Новый NPC',text:'Понял.',voice:{traits:'Очень весёлый',speech:'Сленг и смайлы'}}];
+    });
+    await a.api.aiComments(a.s,a.s.feed[0],'Ответь'); assert.equal(a.s.peopleVoices[0].traits,'Сдержанный, ценит точность');
+    a.context.chatMetadata.unihub=JSON.parse(JSON.stringify(a.s)); const restored=a.api.S();
+    const th=a.api.openThread(restored,'Новый NPC');
+    a.answer(prompt=>{assert.match(prompt,/Кратко и официально, без эмодзи и сленга/); return {reply:'Хорошо.',delta:0};});
+    const r=await a.api.reply(restored,th); assert.equal(r.sent,true); assert.equal(restored.peopleVoices.length,1);
+});
+test('model-supplied invented voice cannot overwrite primary, user or lore personalities', () => {
+    const a=app(); a.s.lorePeople=[{name:'Marvin Branagh',role:'student',speech:'Официально'}]; a.api.S();
+    a.api.rememberVoices(a.s,['Алекс','Студент','Марвин Бранаг'].map(author=>({author,voice:{traits:'Другой',speech:'Мемы'}})));
+    assert.equal(a.s.peopleVoices.length,0); assert.equal(a.s.lorePeople[0].speech,'Официально');
+});
+test('localized aliases share saved NPC voice and canon is prioritized when lore is added', async () => {
+    const a=app(); a.api.rememberVoices(a.s,[{author:'Claire Redfield',voice:{traits:'Старая версия',speech:'Шутит'}}]);
+    a.s.feed=[{author:'Клэр Редфилд',text:'Принято.',comments:[]}]; a.api.S();
+    assert.equal(a.s.peopleVoices[0].name,'Клэр Редфилд');
+    a.api.rememberVoices(a.s,[{author:'Claire Redfield',voice:{traits:'Другая',speech:'Сленг'}}]); assert.equal(a.s.peopleVoices.length,1);
+    a.s.lorePeople=[{name:'Claire Redfield',role:'student',bio:'Из лора',speech:'Речь по канону'}]; a.api.S();
+    const text=await a.api.voiceContext(a.s,['Клэр Редфилд']); assert.match(text,/Речь по канону/); assert.doesNotMatch(text,/Сохранённый характер придуманного NPC: Старая версия/);
+});
+test('direct public reply may be declined instead of forcing a character to answer', async () => {
+    const a=app(); a.setRandom(0.9); const p={id:'p',author:'Алекс',text:'Пост',comments:[]}; a.s.feed.push(p);
+    a.elements['sh-cmt']={value:'Комментарий'};
+    a.answer(prompt=>{assert.match(prompt,/Алекс может ответить Студент/); assert.match(prompt,/допустим пустой список/); assert.doesNotMatch(prompt,/обязательно отвечает/); return {comments:[],score:null,followup:null};});
+    await a.api.ACT.comment({id:'p'},null,a.s); assert.equal(p.comments.length,1); assert.equal(p.comments[0].mine,true); assert.equal(p.loadingComments,false);
+});
+test('quest posts and public conflict do not impose default slang or aggressive personality', async () => {
+    const a=app(); a.s.lorePeople=[{name:'Катя',role:'student',speech:'Сдержанно, без грубости'}];
+    const q=a.api.makeQuest({k:'post',title:'Пост',desc:'Напиши пост',trigger:'post',hook:{type:'post',from:'Катя',intent:'Ответить'}},a.s);
+    a.answer(prompt=>{assert.match(prompt,/Сдержанно, без грубости/); assert.match(prompt,/Эмодзи и сленг используй ТОЛЬКО/); return 'Принято.';});
+    a.api.fireHook(a.s,q,'Пост'); await a.api.drainQueue(); assert.equal(a.s.feed[0].author,'Катя');
+    const th={id:'npc',kind:'dm',name:'Катя',msgs:[],rel:-55}; a.s.threads.push(th);
+    a.answer(prompt=>{assert.match(prompt,/Не навязывай язвительность, агрессию/); assert.match(prompt,/Сдержанно, без грубости/); return {text:'',media:''};});
+    a.api.updateRel(a.s,th,-6,false,8,'Ссора'); await a.api.drainQueue(); assert.equal(a.s.feed.length,1);
+});
+test('NPC extraction records source personality and speech for later generation', async () => {
+    const a=app();
+    a.answer(prompt=>{assert.match(prompt,/temperament и speech выпиши только из данных/); return [{name:'Катя',role:'student',bio:'Студентка',temperament:'Уважает личные границы',speech:'Говорит кратко, без сленга'}];});
+    await a.api.extractLorePeople(a.s); assert.equal(a.s.lorePeople[0].speech,'Говорит кратко, без сленга');
+    const text=await a.api.voiceContext(a.s,['Катя']); assert.match(text,/Уважает личные границы/); assert.match(text,/Говорит кратко, без сленга/);
+});
+test('late generation cannot store an NPC voice in another chat', async () => {
+    const a=app(),d=defer(); a.answer(()=>d.promise); const pending=a.api.aiComments(a.s,{author:'Катя',text:'Пост',comments:[]},'Ответь');
+    for(let i=0;i<30&&!a.calls.length;i++) await Promise.resolve(); assert.equal(a.calls.length,1);
+    a.context.chatMetadata={}; a.context.chatId='other'; const other=a.api.S();
+    d.resolve([{author:'New',text:'Hi',voice:{traits:'Новый характер',speech:'Речь'}}]);
+    const r=await pending; assert.equal(r.length,0); assert.equal(a.s.peopleVoices,undefined); assert.equal(other.peopleVoices,undefined);
+});
+test('unchecked main relationships cannot label a card-established couple as mere acquaintances in social prompts', async () => {
+    const a=app(); a.context.characters[0].description='{{user}} is his girlfriend.';
+    a.answer(prompt=>{
+        assert.match(prompt,/Студент is his girlfriend/); assert.match(prompt,/Статус ещё не проверен: исходные отношения бери из карточки/);
+        assert.doesNotMatch(prompt,/Отношения с Студент: знакомые/); return [];
+    });
+    await a.api.aiComments(a.s,{author:'Катя',text:'Пост',comments:[]},'Ответь');
+});
 test('messenger receives complete description, personality, scenario and speech examples once', async () => {
     for(const nested of [false,true]) {
         const a=messengerApp();
