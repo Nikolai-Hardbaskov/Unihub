@@ -980,6 +980,40 @@ task — если назначена письменная отработка; ap
         notify(s, `🏛️ ${from}: ${k.consequence}${extras.length ? ` (${extras.join(', ')})` : ''}`, 'warn', { view: 'thread', param: th.id });
     }
 
+    // Audience reactions use wall time, independently of the phone view and story clock.
+    // Keep fractional expectations: rounding a small rate to 1 used to yield zero forever.
+    function audienceLike(item, now, expected) {
+        const age = now - item.t;
+        if (!Number.isFinite(age) || age < 30000 || age >= 2 * DAY) return false;
+        const last = Number.isFinite(item.audienceLikeAt) ? item.audienceLikeAt : item.t;
+        if (now - last < 30000) return false;
+        item.audienceLikeAt = now; // No bursts after a reload, or extra rolls on repeated ticks.
+        const whole = Math.floor(expected);
+        const add = whole + (Math.random() < expected - whole ? 1 : 0);
+        if (add) item.likes = Math.max(0, Number(item.likes) || 0) + add;
+        return true;
+    }
+
+    function tickAudienceLikes(s, now) {
+        const followers = Math.max(0, Number(s.social.followers) || 0);
+        const penalty = cancelled(s) ? 0.15 : 1;
+        let changed = false;
+        for (const p of s.feed) {
+            if (p.mine) {
+                const expected = Math.max(0.2, followers * (now - p.t < HOUR ? 0.02 : 0.004)) * penalty;
+                if (audienceLike(p, now, expected)) changed = true;
+                if ((p.likes || 0) >= 200) questEvent(s, 'likes');
+            }
+            // A comment can be noticed on somebody else's post even without own followers.
+            const reach = Math.max(followers, Number(p.likes) || 0, 10);
+            for (const comment of p.comments || []) if (comment.mine) {
+                const expected = Math.min(3, Math.max(0.1, reach * (now - comment.t < HOUR ? 0.004 : 0.001))) * penalty;
+                if (audienceLike(comment, now, expected)) changed = true;
+            }
+        }
+        return changed;
+    }
+
     function tick() {
         const s = S();
         if (!s || !s.auth) return;
@@ -1004,19 +1038,16 @@ task — если назначена письменная отработка; ap
         if (so.hate > 0) so.hate = Math.max(0, so.hate - 0.05);
         if (so.cancelledUntil && now >= so.cancelledUntil) { so.cancelledUntil = 0; so.hate = Math.min(so.hate, 40); ch = true; notify(s, '🌤️ Волна хейта утихла — вас больше не «отменяют».', 'important'); }
         if (cancelled(s)) so.followers = Math.max(0, so.followers - Math.floor(so.followers * 0.001));
+        if (tickAudienceLikes(s, now)) ch = true;
         const lvBoost = 1 + (levelOf(so) - 1) * 0.3;
         for (const p of s.feed) {
             if (!p.mine) continue;
-            if ((p.likes || 0) >= 200) questEvent(s, 'likes');
             for (const c of p.comments || []) if (c.at && c.at <= now && !c.seen) {
                 c.seen = true; ch = true;
                 if (!(ui.open && ui.view === 'post' && ui.param === p.id)) notify(s, `💬 ${c.author}: ${c.text.slice(0, 60)}`, 'social', { view: 'post', param: p.id });
             }
             const age = now - p.t;
             if (age < 2 * DAY) {
-                const rate = Math.max(1, Math.round(s.social.followers * (age < HOUR ? 0.04 : 0.008) * (cancelled(s) ? 0.15 : 1)));
-                const add = Math.floor(Math.random() * rate);
-                if (add) { p.likes = (p.likes || 0) + add; ch = true; }
                 if (age < 6 * HOUR && Math.random() < 0.25) {
                     const f = cancelled(s) ? 0 : Math.round((1 + Math.floor(Math.random() * Math.max(1, s.social.followers / 60))) * lvBoost);
                     s.social.followers += f; ch = true;
@@ -2867,7 +2898,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.17.7 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.17.8 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {

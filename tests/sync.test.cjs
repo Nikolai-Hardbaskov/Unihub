@@ -37,7 +37,7 @@ function app(options = {}) {
         setClock, aiRaw, onChatChanged, readHorae, parseStoryTime, syncHoraeClock, pollHoraeClock,
         readChatClock, guessedStoryClock, hasStoryProgress, refreshQuests, makeQuest, questEvent, fireHook, stripMention, commentHTML, aiComments, ACT, ui, questHTML, questScopeReady, drainQueue: () => queue,
         queueMessengerReply, tickMessenger, presenceFor, applyPresence, planInitiative, presenceDot, chatsTab, threadView, messengerState, startDM, sceneContactKey, sceneContactState, checkSceneContact, reply, startMeeting, personKey, personName, samePerson, normaliseIdentities, lorePerson, openThread, feedTab, personView, scheduleDM, looksLikeChar, voiceContext, rememberVoices, extractLorePeople, updateRel, cancelUser,
-        realRender, realTick, realNotify, screenHTML, cleanReply, loreText, loreFor, enqueue, genSchedule, occurrences, stampGame, taskView, rating, validSetting, onChange, priceOf, placeFoodOrder, pay, tx, genTaskDesc, updateInjection, postHTML, personVerified,
+        realRender, realTick, realNotify, screenHTML, cleanReply, loreText, loreFor, enqueue, genSchedule, occurrences, stampGame, taskView, rating, validSetting, onChange, priceOf, placeFoodOrder, pay, tx, genTaskDesc, updateInjection, postHTML, personVerified, tickAudienceLikes,
         setWorldInfo: value => { worldInfoModulePromise = Promise.resolve(value); },
         setGenerating: value => { storyGenerating = value; }, getGenerating: () => storyGenerating };
     `;
@@ -1299,4 +1299,39 @@ test('different students retain distinct verification and own posts still follow
     ]; a.api.S();
     assert.equal(a.s.peopleVerification.length, 2); assert.equal(a.s.feed[0].verified, false); assert.equal(a.s.feed[1].verified, true);
     assert.doesNotMatch(a.api.postHTML(a.s.feed[2], a.s), /sh-verified/);
+});
+
+
+test('small audiences can like user posts after the first hour', () => {
+    const a = app(); a.s.social.followers = 50; a.setRandom(0.1);
+    const p = {mine:true, t:a.wall()-2*60*MIN, likes:0, comments:[]}; a.s.feed.push(p);
+    assert.equal(a.api.tickAudienceLikes(a.s, a.wall()), true); assert.equal(p.likes, 1);
+});
+test('user comments receive audience likes on own and NPC posts with the phone closed', () => {
+    const a = app(); a.s.social.followers = 0; a.setRandom(0.01); a.api.ui.open = false;
+    for (const mine of [true, false]) a.s.feed.push({mine, t:a.wall()-3*1440*MIN, likes:20, comments:[
+        {mine:true, t:a.wall()-MIN, likes:0}, {mine:false, t:a.wall()-MIN, likes:7}]});
+    a.api.tickAudienceLikes(a.s, a.wall());
+    for (const p of a.s.feed) {assert.equal(p.comments[0].likes,1); assert.equal(p.comments[1].likes,7); assert.equal(p.likes,20);}
+});
+test('audience reaction cadence survives reload and does not catch up missed time', () => {
+    const a = app(); a.s.social.followers=0; a.setRandom(0);
+    const p={mine:true,t:a.wall()-MIN,likes:0,comments:[]}; a.s.feed.push(p);
+    a.api.tickAudienceLikes(a.s,a.wall()); assert.equal(p.likes,1);
+    a.s.feed=JSON.parse(JSON.stringify(a.s.feed)); const saved=a.s.feed[0];
+    a.api.tickAudienceLikes(a.s,a.wall()+29999); assert.equal(saved.likes,1);
+    a.api.tickAudienceLikes(a.s,a.wall()+30000); assert.equal(saved.likes,2);
+    a.api.tickAudienceLikes(a.s,a.wall()+60*MIN); assert.equal(saved.likes,3);
+});
+test('fresh, future and expired items do not receive audience likes', () => {
+    const a=app(); a.setRandom(0);
+    for(const age of [0,-MIN,2*1440*MIN]) a.s.feed.push({mine:true,t:a.wall()-age,likes:0,comments:[{mine:true,t:a.wall()-age,likes:0}]});
+    assert.equal(a.api.tickAudienceLikes(a.s,a.wall()),false);
+    for(const p of a.s.feed) {assert.equal(p.likes,0);assert.equal(p.comments[0].likes,0);}
+});
+test('fractional reactions are optional and preserve manually liked comments', () => {
+    const a=app(); a.s.social.followers=0; a.setRandom(0.9);
+    const c={mine:true,t:a.wall()-MIN,likes:1,liked:true}; a.s.feed.push({mine:false,likes:0,comments:[c]});
+    a.api.tickAudienceLikes(a.s,a.wall()); assert.equal(c.likes,1);
+    a.setRandom(0); a.api.tickAudienceLikes(a.s,a.wall()+30000); assert.equal(c.likes,2); assert.equal(c.liked,true);
 });
