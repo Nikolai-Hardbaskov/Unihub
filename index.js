@@ -618,10 +618,10 @@
         if (!ch) return '';
         const parts = [`Карточка персонажа ${c.name2}:`];
         const d = field(ch, 'description'), p = field(ch, 'personality'), sc = field(ch, 'scenario'), ex = field(ch, 'mes_example');
-        if (d) parts.push(`Описание: ${macros(d).slice(0, 3500)}`);
-        if (p) parts.push(`Личность: ${macros(p).slice(0, 1200)}`);
-        if (sc) parts.push(`Сценарий: ${macros(sc).slice(0, 900)}`);
-        if (ex) parts.push(`Примеры речи персонажа (ориентир для стиля и манеры, не копируй дословно):\n${macros(ex).replace(/<START>/gi, '').trim().slice(0, 1800)}`);
+        if (d) parts.push(`Описание: ${macros(d)}`);
+        if (p) parts.push(`Личность: ${macros(p)}`);
+        if (sc) parts.push(`Сценарий: ${macros(sc)}`);
+        if (ex) parts.push(`Примеры речи персонажа (ориентир для стиля и манеры, не копируй дословно):\n${macros(ex).replace(/<START>/gi, '').trim()}`);
         return parts.join('\n');
     }
     /** Последние сообщения основного чата — чтобы персонаж помнил сюжет. */
@@ -685,8 +685,10 @@
         const ch = c.characters?.[c.characterId];
         let out = `Персонаж истории: ${c.name2 || '—'}.`;
         if (ch) {
-            if (ch.description) out += `\nОписание персонажа: ${macros(ch.description).slice(0, 2200)}`;
-            if (ch.scenario) out += `\nСценарий: ${macros(ch.scenario).slice(0, 700)}`;
+            const d = field(ch,'description'), p = field(ch,'personality'), sc = field(ch,'scenario');
+            if (d) out += `\nОписание персонажа: ${macros(d)}`;
+            if (p) out += `\nЛичность персонажа: ${macros(p)}`;
+            if (sc) out += `\nСценарий: ${macros(sc)}`;
         }
         return out;
     }
@@ -713,10 +715,10 @@
         if (p.gender === 'nb') return `${p.name} — небинарная персона. Избегай родовых форм: используй нейтральные конструкции («ты сегодня в задумчивости», «ты пришёл(ла)» не пиши — перестрой фразу), местоимения они/их.`;
         return `Пол ${p.name} не указан — избегай родовых форм по отношению к ${p.name}.`;
     }
-    function world(s) {
-        const p = s.profile;
-        if (mundane(s)) return `Мир: обычный университет в реальном современном мире. Никакой магии, мистики и сверхъестественных существ — все студенты и преподаватели обычные люди, без видов и способностей. Не упоминай магию, расы, виды и способности ни в каком виде; еда, предметы, клубы, события и задания — реалистичные, как в настоящем вузе.\n${charInfo()}\n${genderRule(p)}\nСтудент-пользователь: ${p.name}; пол: ${GENDERS[p.gender] || 'не указан'}; факультет: ${p.faculty || 'не выбран'}; курс: ${p.year}.`;
-        return `Мир: университет, где учатся люди, полулюди и сверхъестественные виды.\n${charInfo()}\n${genderRule(p)}\nСтудент-пользователь: ${p.name}; пол: ${GENDERS[p.gender] || 'не указан'}; вид: ${p.species || 'не указан'}; способности: ${abilityInfo(p)}; факультет: ${p.faculty || 'не выбран'}; курс: ${p.year}.\n${reactionGuide(s)}`;
+    function world(s, includeCharacter = true) {
+        const p = s.profile, character = includeCharacter ? charInfo() : '';
+        if (mundane(s)) return `Мир: обычный университет в реальном современном мире. Никакой магии, мистики и сверхъестественных существ — все студенты и преподаватели обычные люди, без видов и способностей. Не упоминай магию, расы, виды и способности ни в каком виде; еда, предметы, клубы, события и задания — реалистичные, как в настоящем вузе.\n${character}\n${genderRule(p)}\nСтудент-пользователь: ${p.name}; пол: ${GENDERS[p.gender] || 'не указан'}; факультет: ${p.faculty || 'не выбран'}; курс: ${p.year}.`;
+        return `Мир: университет, где учатся люди, полулюди и сверхъестественные виды.\n${character}\n${genderRule(p)}\nСтудент-пользователь: ${p.name}; пол: ${GENDERS[p.gender] || 'не указан'}; вид: ${p.species || 'не указан'}; способности: ${abilityInfo(p)}; факультет: ${p.faculty || 'не выбран'}; курс: ${p.year}.\n${reactionGuide(s)}`;
     }
     async function loreText(filterRe) {
         const c = ctx();
@@ -2600,7 +2602,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.17.3 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.17.4 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2932,7 +2934,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             const relTxt = th.kind === 'group' ? '' : `\nОтношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100, шкала от −100 вражда до 100 близость).${th.relNote ? ` ${th.relNote}` : ''}${relLabel(th) === 'не знакомы' ? ` Они не знакомы — ${th.name} пишет как незнакомому человеку.` : ''}${th.kind === 'char' && s.profile.relWithChar ? ` ${th.name} и ${s.profile.name} — пара.` : ''}${jealousNote(s, th)}`;
             if (S() !== s || (opts.valid && !opts.valid())) return { stale: true };
             if (sceneContactState(s, th) !== 'apart') return { sceneBlocked: sceneContactState(s, th) };
-            const raw = await aiRaw(`${world(s)}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist || '(переписки ещё не было)'}\n\n${opts.initiate ? `${opts.initiate}\n\n` : ''}Напиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date(NOW()).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(NOW())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
+            const raw = await aiRaw(`${world(s, th.kind !== 'char')}${extra}${relTxt}\n\nЭто переписка в защищённом мессенджере UniHub. Ты отвечаешь за ${who}\n\nИстория переписки:\n${hist || '(переписки ещё не было)'}\n\n${opts.initiate ? `${opts.initiate}\n\n` : ''}Напиши следующее сообщение собеседника: 1–3 предложения, живо, в стиле мессенджера, по-русски. Реагируй на вид и способности ${s.profile.name} по правилам выше — особенно в начале знакомства, но не в каждом сообщении. Отношения развиваются естественно: грубость портит, забота, юмор и флирт сближают; возможны дружба, роман или вражда.${th.kind === 'group' ? '' : `\nСейчас ${new Date(NOW()).toLocaleString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} (сегодня ${isoDay(NOW())}).\nОтветь JSON: {"reply":"текст сообщения","delta":число от −6 до 6 — как последнее сообщение ${s.profile.name} изменило отношение,"flirt":true если в переписке сейчас флирт, иначе false,"meet":null}\nПоле meet заполняй, ТОЛЬКО если с учётом твоего ответа вы с ${s.profile.name} явно договорились встретиться и понятны день и время: {"date":"ГГГГ-ММ-ДД","time":"ЧЧ:ММ","kind":"date — свидание, friends — дружеская встреча, study — учёба","place":"break — на перемене, after — после пар, skip — вместо пар, dorm — в общежитии, cafe — в кафе кампуса, city — в городе","note":"где именно, коротко"}. Если лишь обсуждаете или время не названо — null.\nЕсли ${s.profile.name} говорит, что в назначенное время у неё/него пара, отреагируй строго в характере персонажа: кто-то подначивает прогулять («да брось, одна пара ничего не решит»), кто-то сразу соглашается перенести и предлагает другое время, кто-то обижается или ворчит. Заполняй meet только когда договорённость снова окончательная: новое время, либо прежнее с place "skip", если ${s.profile.name} согласился(ась) прогулять.`}`);
             if (S() !== s || (opts.valid && !opts.valid())) return { stale: true };
             if (sceneContactState(s, th) !== 'apart') return { sceneBlocked: sceneContactState(s, th) };
             const js = th.kind === 'group' ? null : parseJSON(raw);
@@ -3209,7 +3211,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
                 const sceneKey = sceneContactKey(th);
                 const m = { with: th.name, kind, place, note };
                 th.msgs.push({ me: true, text: `📅 Приглашение: ${meetText(m)}, ${fmtWhen(at)}`, t: now });
-                const r = await aiJSON(`${world(s)}${th.kind === 'char' ? `
+                const r = await aiJSON(`${world(s, th.kind !== 'char')}${th.kind === 'char' ? `
 ${charCard()}` : ''}
 
 ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species})` : ''} через UniHub: ${KINDS[kind]}, ${fmtWhen(at)}, ${PLACES[place]}${note ? `, ${note}` : ''}. Отношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100).${th.kind === 'char' && s.profile.relWithChar ? ' Они пара.' : ''} Реши, соглашается ли ${th.name}, учитывая отношения, характер${place === 'skip' ? ', то, что это прогул,' : ''} и тип встречи.

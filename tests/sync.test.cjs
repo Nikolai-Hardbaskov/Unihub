@@ -54,6 +54,36 @@ function app() {
         add: (mes, is_user = false) => { context.chat.push({ name: is_user ? 'Студент' : 'Алекс', mes, is_user, send_date: 'm' + context.chat.length }); return context.chat.length - 1; },
     };
 }
+test('messenger receives complete description, personality, scenario and speech examples once', async () => {
+    for(const nested of [false,true]) {
+        const a=messengerApp();
+        const card={description:'HEAD-D '+ 'D'.repeat(12000)+' {{user}} TAIL-D',personality:'HEAD-P '+ 'P'.repeat(4500)+' {{char}} TAIL-P',
+            scenario:'HEAD-S '+ 'S'.repeat(3800)+' TAIL-S',mes_example:'<START>HEAD-E '+ 'E'.repeat(6000)+' {{user}} TAIL-E'};
+        a.context.characters[0]=nested ? {data:card} : card;
+        a.answer(prompt=>{
+            for(const value of Object.values(card)) {
+                const text=value.replaceAll('{{user}}','Студент').replaceAll('{{char}}','Алекс').replaceAll('<START>','');
+                assert.ok(prompt.includes(text));
+            }
+            for(const tail of ['TAIL-D','TAIL-P','TAIL-S','TAIL-E']) assert.equal(prompt.split(tail).length-1,1,tail);
+            return {reply:'Привет!',delta:0};
+        });
+        const r=await a.api.reply(a.s,a.th); assert.equal(r.sent,true); assert.equal(a.calls.length,1);
+    }
+});
+test('general generation receives complete character fields from both card formats', async () => {
+    for(const nested of [false,true]) {
+        const a=app();
+        const card={description:'D'.repeat(9000)+' DESCRIPTION-END',personality:'P'.repeat(2800)+' PERSONALITY-END',scenario:'S'.repeat(3100)+' SCENARIO-END'};
+        a.context.characters[0]=nested ? {data:card} : card;
+        a.answer(prompt=>{
+            for(const value of Object.values(card)) assert.ok(prompt.includes(value));
+            return [{author:'Катя',text:'Комментарий'}];
+        });
+        const list=await a.api.aiComments(a.s,{author:'Маша',text:'Пост',comments:[]},'Ответь');
+        assert.equal(list.length,1); assert.equal(a.calls.length,1);
+    }
+});
 test('relationship block at the end of a long card establishes the couple without phone messages', async () => {
     const a=app(); a.context.name1='Arisha'; a.s.profile.name='Ариша';
     a.context.characters[0]={data:{description:'APPEARANCE: '+ 'Detail. '.repeat(1100)+"RELATIONSHIPS: {{user}} is his girlfriend; they've been dating for quite some time and are in a serious relationship.",personality:'Kind.',scenario:'On duty.'}};
