@@ -37,7 +37,7 @@ function app(options = {}) {
         setClock, aiRaw, onChatChanged, readHorae, parseStoryTime, syncHoraeClock, pollHoraeClock,
         readChatClock, guessedStoryClock, hasStoryProgress, refreshQuests, makeQuest, questEvent, fireHook, stripMention, commentHTML, aiComments, ACT, ui, questHTML, questScopeReady, drainQueue: () => queue,
         queueMessengerReply, tickMessenger, presenceFor, applyPresence, planInitiative, presenceDot, chatsTab, threadView, messengerState, startDM, sceneContactKey, sceneContactState, checkSceneContact, reply, startMeeting, personKey, personName, samePerson, normaliseIdentities, lorePerson, openThread, feedTab, personView, scheduleDM, looksLikeChar, voiceContext, rememberVoices, extractLorePeople, updateRel, cancelUser,
-        realRender, realTick, realNotify, screenHTML, cleanReply, loreText, loreFor, enqueue, genSchedule, occurrences, stampGame, taskView, rating, validSetting, onChange, priceOf, placeFoodOrder, pay, tx, genTaskDesc, updateInjection,
+        realRender, realTick, realNotify, screenHTML, cleanReply, loreText, loreFor, enqueue, genSchedule, occurrences, stampGame, taskView, rating, validSetting, onChange, priceOf, placeFoodOrder, pay, tx, genTaskDesc, updateInjection, postHTML, personVerified,
         setWorldInfo: value => { worldInfoModulePromise = Promise.resolve(value); },
         setGenerating: value => { storyGenerating = value; }, getGenerating: () => storyGenerating };
     `;
@@ -1264,4 +1264,39 @@ test('all extension screens render with populated state after the fixes', () => 
         ...['post', 'person', 'me', 'thread', 'meet', 'task', 'excuse', 'meetings', 'clock', 'delivery', 'market', 'wallet', 'campus', 'profile', 'settings', 'log'].map(view => ({ view, param: ({ post: 'p', person: 'Катя', thread: 'char', meet: 'char', task: 't' })[view] || null }))];
     for (const state of cases) { Object.assign(a.api.ui, state); assert.equal(typeof a.api.screenHTML(), 'string'); }
     for (const studyTab of ['schedule', 'tasks', 'grades', 'rating', 'help']) { Object.assign(a.api.ui, { tab: 'study', view: null, studyTab }); assert.equal(typeof a.api.screenHTML(), 'string'); }
+});
+
+test('legacy mixed badges use one author profile across feed, post and profile views', () => {
+    const a = app(); a.s.feed = [
+        { id: 'one', author: 'Leon Kennedy', verified: true, text: 'One', comments: [] },
+        { id: 'two', author: 'Леон Кеннеди', verified: false, text: 'Two', comments: [] },
+    ]; a.api.S();
+    assert.equal(a.s.peopleVerification.length, 1);
+    for (const p of a.s.feed) { assert.equal(p.verified, true); assert.match(a.api.postHTML(p, a.s), /sh-verified/); assert.match(a.api.postHTML(p, a.s, true), /sh-verified/); }
+    assert.equal((a.api.personView(a.s, 'Leon Kennedy').match(/sh-verified/g) || []).length, 3);
+});
+test('new model output cannot change established author verification', async () => {
+    for (const verified of [true, false]) {
+        const a = app(); a.s.feed = [{ id: 'old', author: 'Катя', verified, text: 'Old', comments: [] }]; a.api.S();
+        a.answer(() => ({ posts: [{ author: 'Катя', verified: !verified, text: 'New' }] }));
+        await a.api.ACT.genFeed({}, null, a.s);
+        assert.equal(a.s.feed.length, 2); assert.ok(a.s.feed.every(p => p.verified === verified));
+        for (const p of a.s.feed) assert.equal(a.api.postHTML(p, a.s).includes('sh-verified'), verified);
+    }
+});
+test('author verification survives reload and removal of old feed posts', async () => {
+    const a = app(); a.s.feed = [{ author: 'Катя', verified: false, text: 'Old', comments: [] }]; a.api.S();
+    a.s.feed = []; a.context.chatMetadata.unihub = JSON.parse(JSON.stringify(a.s)); const s = a.api.S();
+    s.feed.push({ author: 'Катя', verified: true, text: 'New', comments: [] }); a.api.S(); assert.equal(s.feed[0].verified, false);
+    a.context.chatId = 'other'; a.context.chatMetadata = {}; const other = a.api.S(); other.feed.push({ author: 'Катя', verified: true, comments: [] }); a.api.S();
+    assert.equal(other.feed[0].verified, true);
+});
+test('different students retain distinct verification and own posts still follow user level', () => {
+    const a = app(); a.s.feed = [
+        { author: 'Claire Redfield', verified: false, text: 'One', comments: [] },
+        { author: 'Claire Smith', verified: true, text: 'Two', comments: [] },
+        { author: a.s.profile.name, mine: true, verified: true, text: 'Mine', comments: [] },
+    ]; a.api.S();
+    assert.equal(a.s.peopleVerification.length, 2); assert.equal(a.s.feed[0].verified, false); assert.equal(a.s.feed[1].verified, true);
+    assert.doesNotMatch(a.api.postHTML(a.s.feed[2], a.s), /sh-verified/);
 });

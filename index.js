@@ -344,6 +344,7 @@
         const field = (object, key) => { if (object && typeof object[key] === 'string' && object[key].trim()) records.push([object, key]); };
         for (const p of s.lorePeople || []) field(p, 'name');
         for (const p of s.peopleVoices || []) field(p, 'name');
+        for (const p of s.peopleVerification || []) field(p, 'name');
         for (const p of s.feed || []) { if (!p.mine) field(p, 'author'); for (const c of p.comments || []) { if (!c.mine) field(c, 'author'); field(c, 'replyTo'); } }
         for (const th of s.threads || []) if (privateThread(th)) { field(th, 'name'); for (const m of th.msgs || []) field(m, 'from'); }
         for (const p of [...(s.dating?.profiles || []), ...(s.dating?.matches || [])]) field(p, 'name');
@@ -499,6 +500,7 @@
             migrated.add(s);
         }
         normaliseIdentities(s);
+        syncPersonVerification(s);
         if (s.auth && gameMode(s) && !s.studyClockVersion && s.clock.storyInitialized && s.enforceFrom > s.clock.t && s.clock.source !== 'вручную'
             && !s.grades.length && !s.strikes.length && !Object.keys(s.attendance).length) alignStudyClock(s, s.clock.t);
         if (!s.studyClockVersion && s.clock.storyInitialized) s.studyClockVersion = 1;
@@ -2286,10 +2288,29 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
         return { name, species, followers: 20 + (h % 900), following: s.social.following.some(n => samePerson(s,n,name)) };
     }
     const nameBtn = (name, species) => `<button class="sh-name" data-act="person" data-name="${esc(name)}">${esc(name)}${presenceDot(S(), name)}</button>${species ? ` ${badge(species)}` : ''}`;
+    function syncPersonVerification(s) {
+        const profiles = new Map();
+        for (const p of s.peopleVerification || []) {
+            const name = personName(s, p.name), key = personKey(name), existing = profiles.get(key);
+            profiles.set(key, { name, verified: p.verified === true || existing?.verified === true });
+        }
+        const legacy = new Map();
+        for (const p of s.feed) if (!p.mine && p.author) {
+            const name = personName(s, p.author), key = personKey(name);
+            legacy.set(key, { name, verified: p.verified !== false || legacy.get(key)?.verified === true });
+        }
+        // При первом объединении сохраняем уже выданную галочку. Новые посты не меняют профиль.
+        for (const [key, p] of legacy) if (!profiles.has(key)) profiles.set(key, p);
+        s.peopleVerification = [...profiles.values()];
+        for (const p of s.feed) if (!p.mine && p.author) p.verified = profiles.get(personKey(personName(s, p.author))).verified;
+    }
+    function personVerified(s, name) {
+        return s.peopleVerification?.find(p => samePerson(s, p.name, name))?.verified === true;
+    }
     function postHTML(p, s, full = false) {
         const n = shownComments(p).length;
         return `<article class="sh-card sh-post ${p.story ? 'story' : ''}">
-          <div class="sh-post-h">${ava(p.author, false, p.species)}<div>${p.mine ? `<b>${esc(p.author)}</b>` : nameBtn(p.author, '')}${(p.verified !== false && !p.mine) || (p.mine && levelOf(soc(s)) >= 5) ? ' <i class="fa-solid fa-circle-check sh-verified" title="Верифицирован"></i>' : ''}
+          <div class="sh-post-h">${ava(p.author, false, p.species)}<div>${p.mine ? `<b>${esc(p.author)}</b>` : nameBtn(p.author, '')}${(p.mine ? levelOf(soc(s)) >= 5 : personVerified(s, p.author)) ? ' <i class="fa-solid fa-circle-check sh-verified" title="Верифицирован"></i>' : ''}
           <small>${p.species ? badge(p.species) : ''} ${esc(CHANNELS[p.channel] || '')}, ${fmtD(p.gt ?? p.t)}</small></div></div>
           ${p.story ? `<button class="sh-storytag" data-act="channel" data-ch="story:${esc(p.story)}"><i class="fa-solid fa-book-open"></i> ${esc(p.story)}</button>` : ''}${p.viral ? '<span class="sh-storytag hot"><i class="fa-solid fa-fire"></i> в тренде</span>' : ''}
           <div class="sh-post-t">${esc(p.text)}</div>
@@ -2381,7 +2402,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
         const posts = s.feed.filter((p) => samePerson(s, p.author, name));
         return `${head(name)}
         ${(() => { const lp = lorePerson(s, name); return lp ? `<div class="sh-note"><i class="fa-solid fa-book"></i><span>${badge('из лора')} ${esc(lp.bio)}${lp.faculty ? ` · ${esc(lp.faculty)}` : ''}</span></div>` : ''; })()}
-        <div class="sh-card sh-person">${ava(name, true, pr.species)}<div><b>${esc(name)}</b>${pr.species ? badge(pr.species) : ''}<small>${kfmt(pr.followers + (pr.following ? 1 : 0))} подписчиков · ${posts.length} постов</small></div></div>
+        <div class="sh-card sh-person">${ava(name, true, pr.species)}<div><b>${esc(name)}</b>${personVerified(s, name) ? ' <i class="fa-solid fa-circle-check sh-verified" title="Верифицирован"></i>' : ''}${pr.species ? badge(pr.species) : ''}<small>${kfmt(pr.followers + (pr.following ? 1 : 0))} подписчиков · ${posts.length} постов</small></div></div>
         <div class="sh-row"><button class="sh-btn ${pr.following ? 'ghost' : ''}" data-act="follow" data-name="${esc(name)}">${pr.following ? 'Вы подписаны' : 'Подписаться'}</button>
         <button class="sh-btn ghost" data-act="dm" data-name="${esc(name)}" data-species="${esc(pr.species)}"><i class="fa-regular fa-paper-plane"></i> Личное сообщение</button></div>
         <h4>Публикации</h4>${posts.length ? posts.map((p) => postHTML(p, s)).join('') : empty('Постов в ленте пока нет.')}`;
@@ -2846,7 +2867,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.17.6 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.17.7 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
