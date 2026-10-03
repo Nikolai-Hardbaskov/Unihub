@@ -297,6 +297,133 @@
         };
     }
 
+    /* Личность не меняется от языка подписи: сопоставляем варианты целого имени. */
+    const identityCaches = new WeakMap();
+    const identityNameKeys = new Map();
+    function personKey(name) {
+        const raw = cleanName(name);
+        if (identityNameKeys.has(raw)) return identityNameKeys.get(raw);
+        const cyr = { а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'e',ж:'zh',з:'z',и:'i',й:'i',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'kh',ц:'ts',ч:'ch',ш:'sh',щ:'shch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya' };
+        const variants = { claire:'kler', clare:'kler', michael:'maikl', maykl:'maikl', chris:'kris', christopher:'kristofer', rebecca:'rebekka', jill:'dzhill', sheryl:'sheril', branagh:'brana', branag:'brana' };
+        const key = raw.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[а-яё]/g, c => cyr[c] || '').replace(/[’'`]/g, '').split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+            .map(t => variants[t] || t.replace(/ph/g, 'f').replace(/ck/g, 'k').replace(/ie/g, 'i').replace(/oo/g, 'u').replace(/w/g, 'v').replace(/x/g, 'ks').replace(/y$/g, 'i')).join(' ');
+        if (identityNameKeys.size > 2000) identityNameKeys.clear();
+        const result = key || raw.toLowerCase().normalize('NFKC');
+        identityNameKeys.set(raw, result);
+        return result;
+    }
+    function personName(s, name) {
+        const raw = cleanName(name);
+        return identityCaches.get(s)?.names.get(personKey(raw)) || raw;
+    }
+    function samePerson(s, a, b) {
+        return !!a && !!b && personKey(personName(s, a)) === personKey(personName(s, b));
+    }
+    function identityRecords(s) {
+        const records = [];
+        const field = (object, key) => { if (object && typeof object[key] === 'string' && object[key].trim()) records.push([object, key]); };
+        for (const p of s.lorePeople || []) field(p, 'name');
+        for (const p of s.feed || []) { if (!p.mine) field(p, 'author'); for (const c of p.comments || []) { if (!c.mine) field(c, 'author'); field(c, 'replyTo'); } }
+        for (const th of s.threads || []) if (privateThread(th)) { field(th, 'name'); for (const m of th.msgs || []) field(m, 'from'); }
+        for (const p of [...(s.dating?.profiles || []), ...(s.dating?.matches || [])]) field(p, 'name');
+        for (const m of s.meetings || []) field(m, 'with');
+        for (const p of s.pendingDMs || []) field(p, 'from');
+        for (const j of s.jealousy || []) field(j, 'with');
+        for (const q of s.social?.quests || []) { field(q.hook, 'from'); field(q.hook, 'author'); }
+        for (const st of s.stories || []) for (let i = 0; i < (st.cast || []).length; i++) field(st.cast, i);
+        return records;
+    }
+    function identitySignature(s, records) {
+        return JSON.stringify([ctx().groupId ? '' : ctx().name2, s.profile.name, records.map(([o,k])=>o[k]), s.social.following, s.peopleIdentities || [],
+            s.threads.map(t=>[t.id,t.kind,!!t.typing,!!t.relSyncing,!!(t.pendingReply && messengerQueued.has(t.pendingReply))]), Object.keys(s.messenger?.presence || {})]);
+    }
+    function normaliseIdentities(s) {
+        const records = identityRecords(s), stored = s.peopleIdentities || [];
+        const signature = identitySignature(s, records);
+        if (identityCaches.get(s)?.signature === signature) return;
+        const groups = new Map();
+        const add = (name, preferred = false) => {
+            name = cleanName(name); const key = personKey(name); if (!key) return;
+            if (!groups.has(key)) groups.set(key, { names: new Set(), preferred: '' });
+            const g = groups.get(key); g.names.add(name); if (preferred) g.preferred = name;
+        };
+        for (const p of stored) for (const name of [p.name, ...(p.aliases || [])]) add(name);
+        for (const [o, k] of records) add(o[k]);
+        for (const name of s.social.following) add(name);
+        // Только подтверждённые варианты из источников с тем же полным ключом.
+        for (const p of s.lorePeople || []) for (const alias of p.aliases || []) if (personKey(alias) === personKey(p.name)) add(alias);
+        add(s.profile.name, true); if (!ctx().groupId) add(ctx().name2, true);
+        const fullByFirst = new Map();
+        for (const key of groups.keys()) if (key.includes(' ')) { const first = key.split(' ')[0]; if (!fullByFirst.has(first)) fullByFirst.set(first, []); fullByFirst.get(first).push(key); }
+        for (const [first, keys] of fullByFirst) if (keys.length === 1 && groups.has(first) && groups.get(first).preferred !== s.profile.name) {
+            const short = groups.get(first), full = groups.get(keys[0]); for (const n of short.names) full.names.add(n); groups.delete(first);
+        }
+        const names = new Map(), identities = [];
+        for (const [key, g] of groups) {
+            const candidates = [...g.names].sort((a,b) => b.split(/\s+/).length - a.split(/\s+/).length || Number(/[а-яё]/i.test(b)) - Number(/[а-яё]/i.test(a)) || a.localeCompare(b, 'ru'));
+            const canonical = g.preferred || candidates[0];
+            const aliases = candidates.slice(0, 16);
+            for (const name of aliases) names.set(personKey(name), canonical);
+            names.set(key, canonical);
+            if ((fullByFirst.get(key.split(' ')[0]) || []).length === 1 && key.includes(' ') && !groups.has(key.split(' ')[0])) names.set(key.split(' ')[0], canonical);
+            identities.push({ name: canonical, aliases });
+        }
+        identityCaches.set(s, { names, signature: '' });
+        s.peopleIdentities = identities.slice(-300);
+        for (const [o, k] of records) o[k] = personName(s, o[k]);
+        s.social.following = [...new Set(s.social.following.map(n => personName(s,n)))];
+        for (const st of s.stories || []) st.cast = [...new Set((st.cast || []).map(n => personName(s,n)))];
+        const lore = new Map();
+        for (const p of s.lorePeople || []) {
+            const key = personKey(p.name), old = lore.get(key);
+            if (!old) lore.set(key, p);
+            else { old.aliases = [...new Set([...(old.aliases || []), ...(p.aliases || [])])]; for (const k of ['bio','species','faculty','abilities','relation']) if (!old[k] && p[k]) old[k] = p[k]; }
+        }
+        s.lorePeople = [...lore.values()];
+        for (const key of ['profiles', 'matches']) if (s.dating?.[key]) s.dating[key] = [...new Map(s.dating[key].map(p => [personKey(p.name), p])).values()];
+        if (s.messenger?.presence) {
+            const presence = {};
+            for (const [key,p] of Object.entries(s.messenger.presence)) {
+                const canonical = `p:${personName(s, key.slice(2)).toLowerCase()}`, old = presence[canonical];
+                if (!old || (p.sourceKey && !old.sourceKey)) presence[canonical] = p;
+                const nearby = [old,p].find(v => v?.nearby && v.nearbySourceKey === storySyncKey());
+                if (nearby) { presence[canonical].nearby = true; presence[canonical].nearbySourceKey = nearby.nearbySourceKey; }
+            }
+            s.messenger.presence = presence;
+        }
+        mergePersonThreads(s);
+        const updated = identityRecords(s);
+        identityCaches.get(s).signature = identitySignature(s, updated);
+    }
+    function mergePersonThreads(s) {
+        const groups = new Map();
+        for (const th of s.threads) if (privateThread(th)) { const key = personKey(th.name); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(th); }
+        for (const list of groups.values()) {
+            if (list.length < 2 || list.some(t => t.typing || t.relSyncing || (t.pendingReply && messengerQueued.has(t.pendingReply)))) continue;
+            list.sort((a,b) => Number(b.kind === 'char') - Number(a.kind === 'char') || (b.t || 0) - (a.t || 0));
+            const main = list[0], msgs = [], seen = new Set();
+            for (const th of list) for (const m of th.msgs || []) { const key = m.id ? JSON.stringify([m.id,m.me,m.t,m.text,m.from]) : null; if (key && seen.has(key)) continue; if (key) seen.add(key); msgs.push(m); }
+            main.msgs = msgs.sort((a,b) => (a.t || 0) - (b.t || 0));
+            main.lastInitiativeAt = Math.max(...list.map(t=>t.lastInitiativeAt || 0));
+            const incoming = [...list].sort((a,b)=>(b.lastIncomingAt || 0)-(a.lastIncomingAt || 0))[0];
+            main.lastIncomingAt = incoming.lastIncomingAt; main.lastIncomingStoryKey = incoming.lastIncomingStoryKey;
+            main.dismissedMeets = [...new Set(list.flatMap(t=>t.dismissedMeets || []))].slice(-20);
+            if (list.some(t=>t.known === true)) main.known = true;
+            main.unread = list.reduce((n,t)=>n+(t.unread || 0),0); main.t = Math.max(...list.map(t=>t.t || 0));
+            const pending = list.map(t=>t.pendingReply).filter(Boolean).sort((a,b)=>Number(!!a.initiate)-Number(!!b.initiate) || a.at-b.at);
+            if (pending.length) { main.pendingReply = pending[0]; main.pendingReply.userKey = lastUserKey(main); }
+            for (const th of list.slice(1)) {
+                for (const key of ['bio','species','conflict','reconciled','pendingMeet','contactContext']) if (!main[key] && th[key]) main[key] = th[key];
+                for (const m of s.meetings || []) if (m.threadId === th.id) m.threadId = main.id;
+                for (const n of s.notes || []) if (n.go?.view === 'thread' && n.go.param === th.id) n.go.param = main.id;
+                for (const k of s.strikes || []) if (k.letter === th.id) k.letter = main.id;
+                if (ui.view === 'thread' && ui.param === th.id) ui.param = main.id;
+                s.threads = s.threads.filter(t=>t!==th);
+            }
+            main.sceneContact = undefined; main.relSyncKey = undefined;
+        }
+    }
+
     const migrated = new WeakSet();
     function hasChat() {
         const c = ctx();
@@ -316,6 +443,7 @@
             for (const k in f) if (s[k] === undefined) s[k] = f[k];
             migrated.add(s);
         }
+        normaliseIdentities(s);
         return s;
     }
 
@@ -703,7 +831,7 @@ task — если назначена письменная отработка; ap
         const from = cleanName(r?.from) || 'Деканат факультета';
         const letter = cleanMsg(r?.letter || r?.summary || pick(CONSEQ)).slice(0, 900);
         k.consequence = cleanMsg(r?.summary || letter).slice(0, 300);
-        let th = s.threads.find((t) => t.name.toLowerCase() === from.toLowerCase());
+        let th = s.threads.find((t) => t.name === from);
         if (!th) { th = { id: uid(), name: from, species: '', bio: 'представитель администрации университета, пишет официально', kind: 'official', msgs: [], t: Date.now(), unread: 0, rel: 0 }; s.threads.unshift(th); }
         th.msgs.push({ me: false, text: `📜 ${letter}`, t: Date.now() });
         th.unread = (th.unread || 0) + 1; th.t = Date.now();
@@ -916,11 +1044,11 @@ task — если назначена письменная отработка; ap
             return;
         }
         enqueue(s, async () => {
-            const who = cleanName(h.from || h.author) || 'Аноним';
+            const who = personName(s, h.from || h.author) || 'Аноним';
             const sp = String(h.species || '').slice(0, 40);
             const base = `${world(s)}\n\nЗадание ${s.profile.name}: «${q.t}» — ${q.desc}\nЗамысел продолжения: ${h.intent || h.text || ''}\nПоводом стало действие ${s.profile.name}: ${act}${detail ? ` — «${String(detail).slice(0, 300)}»` : ''}.`;
             if (h.type === 'dm') {
-                let th = s.threads.find((t) => t.name.toLowerCase() === who.toLowerCase());
+                let th = s.threads.find((t) => privateThread(t) && samePerson(s, t.name, who));
                 if (!th) { th = { id: uid(), name: who, species: sp, bio: String(h.intent || '').slice(0, 200), kind: 'dm', msgs: [], t: Date.now(), unread: 0, rel: 0 }; s.threads.unshift(th); }
                 if (!th.pendingReply) queueMessengerReply(s, th, { initiate: `${base}\n${who} пишет первым(ой), откликаясь именно на описанное действие. Не приписывай пользователю других действий.` });
             } else if (h.type === 'post') {
@@ -1024,7 +1152,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         notify(s, `🚫 Вас «отменили» в UniHub! −${kfmt(lost)} подписчиков, охваты рухнули на сутки.`, 'bad');
         enqueue(s, async () => {
             const r = await aiJSON(`${world(s)}\n\nСтуденты UniHub устроили травлю ${s.profile.name} за спорные посты и комментарии. Сгенерируй 2 поста разных студентов об этой «отмене»: возмущение, мемы, кто-то заступается. Всё на русском.\nФормат: [{"author":"","species":"","text":"до 250 символов"}]`);
-            for (const x of Array.isArray(r) ? r : []) if (x && x.author && x.text) s.feed.unshift({ id: uid(), author: cleanName(x.author), species: SP(s, x.species), channel: 'general', text: cleanMsg(x.text).slice(0, 500), likes: 50 + Math.floor(Math.random() * 500), t: Date.now(), comments: [], story: `Отмена ${s.profile.name}` });
+            for (const x of Array.isArray(r) ? r : []) if (x && x.author && x.text) s.feed.unshift({ id: uid(), author: personName(s, x.author), species: SP(s, x.species), channel: 'general', text: cleanMsg(x.text).slice(0, 500), likes: 50 + Math.floor(Math.random() * 500), t: Date.now(), comments: [], story: `Отмена ${s.profile.name}` });
         });
     }
     /** Оценка поста или комментария пользователя сообществом. */
@@ -1555,12 +1683,14 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     function loreStudentsLine(s, max = 10) {
         const list = lorePeople(s).slice(0, max);
         const rule = `\nUniHub — приложение для студентов: родители, опекуны, старшие родственники ${ctx().name2} и других персонажей, а также люди вне университета НЕ пользуются им — не делай их авторами постов, комментаторами, анкетами или собеседниками.`;
-        if (!list.length) return rule;
-        return `${rule}\nСтуденты из лора этого мира (используй их среди авторов и собеседников, сохраняя имена, виды и характеры; не меняй им вид): ${list.map((p) => `${p.name} (${p.species || 'вид не указан'}${p.faculty ? `, ${p.faculty}` : ''}${p.year ? `, ${p.year} курс` : ''}): ${p.bio}`).join('; ').slice(0, 1800)}.`;
+        const names = `\nЕдиное написание имён известных людей: ${(s.peopleIdentities || []).map(p=>p.name).slice(0, 40).join('; ')}. Используй эти полные имена без перевода, сокращения или смены фамилии. Языковой вариант не является новым персонажем.`;
+        if (!list.length) return rule + names;
+        return `${rule}${names}\nСтуденты из лора этого мира (используй их среди авторов и собеседников, сохраняя имена, виды и характеры; не меняй им вид): ${list.map((p) => `${p.name} (${p.species || 'вид не указан'}${p.faculty ? `, ${p.faculty}` : ''}${p.year ? `, ${p.year} курс` : ''}): ${p.bio}`).join('; ').slice(0, 1800)}.`;
     }
     function lorePerson(s, name) {
         const n = String(name || '').toLowerCase();
-        return (s.lorePeople || []).find((p) => p.name.toLowerCase() === n || n.startsWith(p.name.toLowerCase().split(' ')[0] + ' ') || p.name.toLowerCase().startsWith(n.split(' ')[0] + ' '));
+        const matches = (s.lorePeople || []).filter(p => samePerson(s,p.name,n));
+        return matches.length === 1 ? matches[0] : null;
     }
     /** Находит в лорбуке и карточке студентов и сотрудников университета, отсекая родных и посторонних. */
     async function extractLorePeople(s) {
@@ -1572,14 +1702,14 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 - "staff" — преподаватель или сотрудник университета;
 - "other" — все остальные: родители, опекуны, бабушки и дедушки, старшие родственники ${c.name2} и любых других персонажей, горожане, люди вне университета, дети.
 Родители и старшая родня — ВСЕГДА "other", даже если связаны с университетом.
-Формат: [{"name":"имя как в лоре","species":"вид по-русски","role":"student","faculty":"","year":2,"abilities":"","bio":"характер и важное, 1–2 предложения","relation":"кем приходится ${c.name2}"}]. Если никого нет — пустой массив.`);
+Для одного персонажа используй одно полное имя. aliases — другие написания того же полного имени на русском или английском; не включай людей с другим именем или фамилией.\nФормат: [{"name":"имя как в лоре","aliases":[],"species":"вид по-русски","role":"student","faculty":"","year":2,"abilities":"","bio":"характер и важное, 1–2 предложения","relation":"кем приходится ${c.name2}"}]. Если никого нет — пустой массив.`);
         if (S() !== s) return 0;
         const list = (Array.isArray(r) ? r : []).filter((p) => p && p.name).map((p) => ({
-            name: cleanName(p.name).slice(0, 50), species: cleanMsg(p.species || '').slice(0, 40),
+            name: cleanName(p.name).slice(0, 50), aliases: (Array.isArray(p.aliases) ? p.aliases : []).map(cleanName).filter(n => personKey(n) === personKey(p.name)).slice(0, 8), species: cleanMsg(p.species || '').slice(0, 40),
             role: p.role === 'student' || p.role === 'staff' ? p.role : 'other',
             faculty: cleanMsg(p.faculty || '').slice(0, 60), year: clamp(parseInt(p.year, 10) || 0, 0, MAX_YEAR),
             abilities: cleanMsg(p.abilities || '').slice(0, 120), bio: cleanMsg(p.bio || '').slice(0, 300), relation: cleanMsg(p.relation || '').slice(0, 80),
-        })).filter((p) => p.role !== 'other' && !FAMILY_RE.test(p.relation) && p.name.toLowerCase() !== String(c.name2).toLowerCase() && p.name !== s.profile.name);
+        })).filter((p) => p.role !== 'other' && !FAMILY_RE.test(p.relation) && !samePerson(s,p.name,c.name2) && !samePerson(s,p.name,s.profile.name));
         s.lorePeople = list.slice(0, 30);
         s.lorePeopleAt = Date.now();
         save(s);
@@ -1838,12 +1968,13 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     const shownComments = (p) => (p.comments || []).filter((c) => !c.at || c.at <= Date.now());
     const kfmt = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1).replace('.', ',')} млн` : n >= 10000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1).replace('.', ',')} тыс.` : String(n));
     function personOf(s, name) {
-        if (name === s.profile.name) return null;
-        const post = s.feed.find((p) => p.author === name);
+        name = personName(s, name);
+        if (samePerson(s, name, s.profile.name)) return null;
+        const post = s.feed.find((p) => samePerson(s, p.author, name));
         let species = post?.species || lorePerson(s, name)?.species || '';
-        if (!species) for (const p of s.feed) { const c = (p.comments || []).find((x) => x.author === name); if (c) { species = c.species; break; } }
+        if (!species) for (const p of s.feed) { const c = (p.comments || []).find((x) => samePerson(s, x.author, name)); if (c) { species = c.species; break; } }
         let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-        return { name, species, followers: 20 + (h % 900), following: s.social.following.includes(name) };
+        return { name, species, followers: 20 + (h % 900), following: s.social.following.some(n => samePerson(s,n,name)) };
     }
     const nameBtn = (name, species) => `<button class="sh-name" data-act="person" data-name="${esc(name)}">${esc(name)}${presenceDot(S(), name)}</button>${species ? ` ${badge(species)}` : ''}`;
     function postHTML(p, s, full = false) {
@@ -1873,7 +2004,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             }
             return p.channel === ui.channel;
         });
-        const authors = [...new Map([...lorePeople(s).map((p) => [p.name, { author: p.name }]), ...s.feed.filter((p) => !p.mine).map((p) => [p.author, p])]).values()].slice(0, 14);
+        const authors = [...new Map([...lorePeople(s).map((p) => [personKey(personName(s,p.name)), { author: personName(s,p.name) }]), ...s.feed.filter((p) => !p.mine).map((p) => [personKey(personName(s,p.author)), { ...p, author: personName(s,p.author) }])]).values()].slice(0, 14);
         const chips = { ...CHANNELS, stories: 'Сюжеты', following: 'Подписки', mine: 'Мои посты' };
         if (mundane(s)) delete chips.species;
         if (ui.channel.startsWith('story:')) chips[ui.channel] = `📖 ${ui.channel.slice(6)}`;
@@ -1905,9 +2036,15 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         while ((next = out.replace(re, '')) !== out) out = next;
         return out.trim();
     }
+    function stripPersonMention(s, text, name) {
+        const identity = (s.peopleIdentities || []).find(p => samePerson(s,p.name,name));
+        let out = String(text || '');
+        for (let i = 0; i < 3; i++) { const before = out; for (const alias of [name, ...(identity?.aliases || [])]) out = stripMention(out,alias); if (before === out) break; }
+        return out;
+    }
     function commentHTML(c, p) {
         const to = c.replyTo ? `<span class="sh-at">@${esc(c.replyTo)}</span> ` : '';
-        c = { ...c, text: stripMention(c.text, c.replyTo) };
+        c = { ...c, text: stripPersonMention(S(), c.text, c.replyTo) };
         return `<div class="sh-cmt ${c.replyTo ? 'reply' : ''} ${c.mine ? 'mine' : ''}">${ava(c.author, false, c.mine ? S()?.profile.species : c.species)}
           <div><div class="sh-cmt-b">${c.mine ? `<b>${esc(c.author)}</b>` : nameBtn(c.author, c.species)}<p>${to}${esc(c.text)}</p></div>
           <div class="sh-cmt-a"><span>${fmtT(c.gt ?? c.t)}</span>
@@ -1929,9 +2066,10 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         </div>`;
     }
     function personView(s, name) {
+        name = personName(s,name);
         const pr = personOf(s, name);
         if (!pr) return meView(s);
-        const posts = s.feed.filter((p) => p.author === name);
+        const posts = s.feed.filter((p) => samePerson(s, p.author, name));
         return `${head(name)}
         ${(() => { const lp = lorePerson(s, name); return lp ? `<div class="sh-note"><i class="fa-solid fa-book"></i><span>${badge('из лора')} ${esc(lp.bio)}${lp.faculty ? ` · ${esc(lp.faculty)}` : ''}</span></div>` : ''; })()}
         <div class="sh-card sh-person">${ava(name, true, pr.species)}<div><b>${esc(name)}</b>${pr.species ? badge(pr.species) : ''}<small>${kfmt(pr.followers + (pr.following ? 1 : 0))} подписчиков · ${posts.length} постов</small></div></div>
@@ -2396,7 +2534,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.17.1 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.17.2 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2481,8 +2619,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function openThread(s, name, species = '', bio = '', kind = 'dm') {
         if (mundane(s)) species = '';
-        name = String(name).trim();
-        let th = s.threads.find((t) => t.name.toLowerCase() === name.toLowerCase());
+        if (kind !== 'group') name = personName(s, name);
+        let th = s.threads.find((t) => kind === 'group' ? t.kind === 'group' && t.name === name : privateThread(t) && samePerson(s, t.name, name));
         if (!th) {
             const lp = lorePerson(s, name);
             th = { id: uid(), name, species: species || lp?.species || '', bio: [bio, lp ? `${lp.bio}${lp.abilities ? ` Способности: ${lp.abilities}.` : ''}${lp.relation ? ` Для ${ctx().name2}: ${lp.relation}.` : ''}` : ''].filter(Boolean).join(' '), kind, msgs: [], t: Date.now(), unread: 0 };
@@ -2521,7 +2659,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         return s.messenger;
     }
     function presenceFor(s, name, now = Date.now()) {
-        const ms = messengerState(s), key = `p:${String(name).trim().toLowerCase()}`;
+        const ms = messengerState(s), key = `p:${personName(s,name).toLowerCase()}`;
         let p = ms.presence[key];
         if (!p) p = ms.presence[key] = { online: Math.random() < 0.55, until: now + messengerRand(3, 8) * MIN, busy: false, sleeping: false, nearby: false };
         if (p.busy && p.freeAt && NOW() >= p.freeAt) { p.busy = p.sleeping = false; p.reason = ''; p.online = true; p.until = now + messengerRand(3, 8) * MIN; }
@@ -2678,7 +2816,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             const contacts = [...(s.dating?.matches || []).map((p) => ({ ...p, context: 'взаимная симпатия в знакомствах' })),
                 ...s.feed.filter((p) => !p.mine && p.comments?.some((c) => c.mine)).map((p) => ({ name: p.author, species: p.species, context: `Пост «${postText(p).slice(0, 140)}». Комментарий пользователя: «${p.comments.filter((c) => c.mine).slice(-1)[0].text.slice(0, 100)}»` }))].slice(0, 8);
             for (const p of contacts) {
-                if (!p.name || p.name === s.profile.name || s.threads.some((th) => th.name.toLowerCase() === p.name.toLowerCase())) continue;
+                if (!p.name || p.name === s.profile.name || s.threads.some((th) => samePerson(s, th.name, p.name))) continue;
                 s.threads.push({ id: uid(), name: p.name, species: p.species || '', bio: p.bio || '', contactContext: p.context, kind: 'dm', known: true, msgs: [], rel: 0, unread: 0, t: now });
                 scheduleStorySync(); changed = true;
             }
@@ -2773,8 +2911,8 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const r = await aiJSON(`${world(s)}\n\nЛента соцсети UniHub. Пост от ${p.author}${p.species ? ` (${p.species})` : ''}${p.mine ? ` — это ${s.profile.name}, пользователь; комментаторы реагируют и на сам пост, и на автора по правилам выше` : ''}:\n«${postText(p)}»${p.media ? `\n[вложение: ${p.media}]` : ''}\n${prev ? `\nУже есть комментарии:\n${prev}\n` : ''}${ctxLines ? `\n${ctxLines}\n` : ''}${loreStudentsLine(s, 8)}${ctx().name2 && !ctx().groupId && (p.mine || Math.random() < 0.4) ? charCommentRule(s) : ''}\n${task}\nКомментарии живые, как в настоящей соцсети: коротко, эмоционально, с эмодзи и сленгом, у каждого свой характер. Всё на русском, виды тоже на русском. Не повторяй уже написанное. Адресата ответа указывай только в replyTo; text начинается сразу с реплики, без @упоминания и повторного имени адресата.${scoreFmt}\nФормат: ${scoreWhat ? '{"comments":[' : '['}{"author":"Имя","species":"вид","text":"до 200 символов","replyTo":"имя или пустая строка","likes":3}]${scoreWhat ? ',"score":{"authority":1,"controversy":0,"sentiment":"positive"},"followup":null}' : ''}`);
         const arr = Array.isArray(r) ? r : (Array.isArray(r?.comments) ? r.comments : []);
         const list = arr.filter((c) => c && c.author && c.text && cleanName(c.author) !== s.profile.name).slice(0, 8).map((c) => ({
-            id: uid(), author: cleanName(c.author), species: SP(s, c.species), text: stripMention(cleanMsg(c.text), cleanName(c.replyTo)).slice(0, 400),
-            replyTo: cleanName(c.replyTo), likes: Math.max(0, parseInt(c.likes, 10) || 0), liked: false,
+            id: uid(), author: personName(s, c.author), species: SP(s, c.species), text: stripMention(cleanMsg(c.text), cleanName(c.replyTo)).slice(0, 400),
+            replyTo: personName(s, c.replyTo), likes: Math.max(0, parseInt(c.likes, 10) || 0), liked: false,
         }));
         list.score = r && !Array.isArray(r) ? r.score : null;
         list.followup = r && !Array.isArray(r) && r.followup && typeof r.followup === 'object' && r.followup.from ? r.followup : null;
@@ -2782,23 +2920,19 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
     /** Кто-то из ленты решил написать в личку — сообщение придёт через 1–2,5 минуты. */
     function scheduleDM(s, fu, species, context) {
-        const from = cleanName(fu.from);
+        const from = personName(s, fu.from);
         if (!from || from === s.profile.name) return;
         s.pendingDMs ||= [];
-        const isChar = fu.is_char === true || fu.is_char === 'true' || looksLikeChar(from);
-        if (s.pendingDMs.some((x) => x.from === from || (isChar && x.isChar))) return;
+        const isChar = looksLikeChar(from);
+        if (s.pendingDMs.some((x) => samePerson(s,x.from,from) || (isChar && x.isChar))) return;
         s.pendingDMs.push({ id: uid(), at: Date.now() + (30 + Math.floor(Math.random() * 60)) * 1000, from, species: species || '', isChar, intent: cleanMsg(fu.intent || '').slice(0, 300), context: String(context || '').slice(0, 900) });
     }
     const ASK_DM = /(напиш|пиши|жду|черкан|стукн|маякн).{0,25}(в\s*)?(личк|лс|личн|директ|dm)|в\s*(личку|лс|личные|директ)/i;
     const PROMISE_DM = /(напишу|пишу|кину|скину|отпишу|стукну|жди).{0,40}(личк|лс|личн|директ|dm)|в\s*(личку|лс|личные)\s*(напишу|пишу|кину|скину)/i;
     /** Похоже ли имя из ленты на персонажа основной истории. */
     function looksLikeChar(name) {
-        const c = ctx();
-        const ch = c.characters?.[c.characterId];
-        const first = String(name || '').toLowerCase().split(/\s+/)[0];
-        if (!first || first.length < 3) return false;
-        const hay = `${c.name2} ${field(ch, 'description')} ${field(ch, 'personality')}`.toLowerCase();
-        return hay.includes(first);
+        const s = S();
+        return !!s && !ctx().groupId && samePerson(s,name,ctx().name2);
     }
     /** Резервное распознавание, если ИИ не отметил followup. */
     function guessFollowup(s, p, myText, replyTo, list) {
@@ -2812,13 +2946,13 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
     }
     function startDM(s, pd) {
         let th;
-        if (pd.isChar) {
+        if (pd.isChar && looksLikeChar(pd.from)) {
             th = s.threads.find((t) => t.kind === 'char');
             const c = ctx();
             if (!th && c.name2 && !c.groupId) { th = { id: uid(), name: c.name2, species: '', bio: '', kind: 'char', msgs: [], t: Date.now(), unread: 0, rel: 0 }; s.threads.push(th); }
         }
         if (!th) {
-            th = s.threads.find((t) => t.name.toLowerCase() === pd.from.toLowerCase());
+            th = s.threads.find((t) => privateThread(t) && samePerson(s, t.name, pd.from));
             if (!th) { th = { id: uid(), name: pd.from, species: pd.species, bio: '', kind: 'dm', msgs: [], t: Date.now(), unread: 0, rel: 10 }; s.threads.unshift(th); }
         }
         if (th.typing || th.pendingReply) return false;
@@ -3197,8 +3331,9 @@ ${story}
             c.liked = !c.liked; c.likes = Math.max(0, (c.likes || 0) + (c.liked ? 1 : -1));
             save(s); render();
         },
-        person: (d, el, s) => { ui.view = d.name === s.profile.name ? 'me' : 'person'; ui.param = d.name; render(); },
+        person: (d, el, s) => { ui.view = samePerson(s, d.name, s.profile.name) ? 'me' : 'person'; ui.param = personName(s,d.name); render(); },
         follow: (d, el, s) => {
+            d = { ...d, name: personName(s,d.name) };
             const f = s.social.following;
             s.social.following = f.includes(d.name) ? f.filter((n) => n !== d.name) : [...f, d.name];
             if (!f.includes(d.name)) questEvent(s, 'follow');
@@ -3223,13 +3358,13 @@ ${ctx().name2 && !ctx().groupId ? `Ровно 1 пост из 6 — от ${ctx()
                 const title = cleanName(st.title).slice(0, 60);
                 let x = s.stories.find((y) => y.title.toLowerCase() === title.toLowerCase());
                 if (!x) { x = { id: uid(), title, cast: [], summary: '', userActs: [], updated: now }; s.stories.push(x); }
-                const cast = (Array.isArray(st.cast) ? st.cast : []).map(cleanName).filter(Boolean).slice(0, 6);
+                const cast = (Array.isArray(st.cast) ? st.cast : []).map(n => personName(s, n)).filter(Boolean).slice(0, 6);
                 if (cast.length) x.cast = cast;
                 x.summary = String(st.summary || x.summary).slice(0, 300);
                 x.updated = now;
             }
             if (s.stories.length > 12) s.stories = s.stories.slice(-12);
-            const posts = arr.filter((p) => p && p.author && p.text).map((p, i) => ({ id: uid(), author: cleanName(p.author), species: SP(s, p.species), channel: CHANNELS[p.channel] && p.channel !== 'all' ? p.channel : 'general', text: cleanMsg(p.text).slice(0, 600), media: String(p.media || '').slice(0, 200), kind: p.kind, likes: Math.max(0, parseInt(p.likes, 10) || 0), verified: p.verified !== false, t: now - i * 7 * MIN, comments: [], story: cleanName(p.story).slice(0, 60) }));
+            const posts = arr.filter((p) => p && p.author && p.text).map((p, i) => ({ id: uid(), author: personName(s, p.author), species: SP(s, p.species), channel: CHANNELS[p.channel] && p.channel !== 'all' ? p.channel : 'general', text: cleanMsg(p.text).slice(0, 600), media: String(p.media || '').slice(0, 200), kind: p.kind, likes: Math.max(0, parseInt(p.likes, 10) || 0), verified: p.verified !== false, t: now - i * 7 * MIN, comments: [], story: cleanName(p.story).slice(0, 60) }));
             s.feed = [...posts, ...s.feed].slice(0, 80);
             save(s);
         }),
@@ -3257,7 +3392,7 @@ ${ctx().name2 && !ctx().groupId ? `Ровно 1 пост из 6 — от ${ctx()
             return withBusy('Подбираю анкеты…', async () => {
                 const r = await aiJSON(`${world(s)}\n\n${loreStudentsLine(s)}\nЕсли среди студентов из лора есть подходящие под фильтры — включи 1–2 из них с их настоящими данными, остальных придумай.\n${s.faculties.length ? `Поле faculty — один из факультетов этого университета: ${s.faculties.map((f) => f.name).join(', ')}${s.profile.faculty && !s.faculties.some((f) => f.name === s.profile.faculty) ? `, ${s.profile.faculty}` : ''}. Факультеты у анкет разные.\n` : ''}Сгенерируй 5 анкет студентов этого университета для ${dt.mode === 'friends' ? 'поиска друзей' : 'романтических знакомств'} в UniHub. Вид пользователя: ${s.profile.species || 'не указан'}. Фильтры: пол — ${{ m: 'только парни', f: 'только девушки', nb: 'только небинарные' }[dt.fGender] || 'любой'}; вид — ${dt.fSpecies || 'любой'}; способности — ${dt.fAbility === NO_ABIL ? 'без сверхъестественных способностей' : dt.fAbility || 'любые'}. ${mundane(s) ? 'Оцени совместимость характеров и интересов с пользователем (compat 0–100) и коротко объясни. Все анкеты — обычные люди, species оставь пустым, abilities — хобби и таланты.' : 'Оцени межвидовую совместимость с пользователем (compat 0–100) и коротко объясни.'}\nФормат: [{"name":"Имя","age":20,"species":"","faculty":"","abilities":"","bio":"до 200 символов","compat":75,"compatNote":"одно предложение","verified":true,"gender":"m, f или nb"}]`);
                 if (!Array.isArray(r) || !r.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
-                dt.profiles = r.filter((p) => p && p.name).map((p) => ({ id: uid(), name: String(p.name).slice(0, 40), age: parseInt(p.age, 10) || 19, species: SP(s, p.species), faculty: String(p.faculty || '').slice(0, 60), abilities: String(p.abilities || '').slice(0, 120), bio: String(p.bio || '').slice(0, 300), compat: clamp(parseInt(p.compat, 10) || 50, 0, 100), compatNote: String(p.compatNote || '').slice(0, 160), verified: p.verified !== false }));
+                dt.profiles = r.filter((p) => p && p.name).map((p) => ({ id: uid(), name: personName(s,p.name), age: parseInt(p.age, 10) || 19, species: SP(s, p.species), faculty: String(p.faculty || '').slice(0, 60), abilities: String(p.abilities || '').slice(0, 120), bio: String(p.bio || '').slice(0, 300), compat: clamp(parseInt(p.compat, 10) || 50, 0, 100), compatNote: String(p.compatNote || '').slice(0, 160), verified: p.verified !== false }));
                 save(s);
             });
         },
@@ -3549,7 +3684,7 @@ ${story ? `Последние события истории:\n${story}\nЕсли
             const to = val('sh-w-to'), sum = Math.round(+val('sh-w-sum')), note = val('sh-w-note');
             if (!to || !(sum > 0)) return toast('warning', 'Укажите получателя и сумму.');
             if (!pay(s, sum, `Перевод: ${to}${note ? ` (${note})` : ''}`)) return render();
-            const th = s.threads.find((t) => t.name.toLowerCase() === to.toLowerCase());
+            const th = s.threads.find((t) => privateThread(t) && samePerson(s, t.name, to));
             if (th) th.msgs.push({ sys: true, text: `Вы перевели ${money(sum)}${note ? `: ${note}` : ''}.`, t: Date.now() });
             ['sh-w-to', 'sh-w-sum', 'sh-w-note'].forEach((id) => { const e = byId(id); if (e) e.value = ''; });
             toast('success', `Переведено ${money(sum)} для ${to}.`);

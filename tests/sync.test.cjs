@@ -35,7 +35,7 @@ function app() {
         scheduleStorySync, flushStorySync, onStoryReply, buildInjection, bindStoryEvents,
         setClock, aiRaw, onChatChanged, readHorae, parseStoryTime, syncHoraeClock, pollHoraeClock,
         readChatClock, guessedStoryClock, hasStoryProgress, refreshQuests, makeQuest, questEvent, fireHook, stripMention, commentHTML, aiComments, ACT, ui, questHTML, questScopeReady, drainQueue: () => queue,
-        queueMessengerReply, tickMessenger, presenceFor, applyPresence, planInitiative, presenceDot, chatsTab, threadView, messengerState, startDM, sceneContactKey, sceneContactState, checkSceneContact, reply, startMeeting,
+        queueMessengerReply, tickMessenger, presenceFor, applyPresence, planInitiative, presenceDot, chatsTab, threadView, messengerState, startDM, sceneContactKey, sceneContactState, checkSceneContact, reply, startMeeting, personKey, personName, samePerson, normaliseIdentities, lorePerson, openThread, feedTab, personView, scheduleDM, looksLikeChar,
         setGenerating: value => { storyGenerating = value; }, getGenerating: () => storyGenerating };
     `;
     vm.runInNewContext(source.replace('    globalThis.UniHub =', exposed + '\n    globalThis.UniHub ='), box);
@@ -470,6 +470,114 @@ function messengerApp(random = 0.2) {
     const p = a.api.presenceFor(a.s, a.th.name); p.online = true; p.until = a.wall() + 8 * MIN;
     return a;
 }
+test('localized full names share identity, including the screenshot cast', () => {
+    const a = app();
+    for (const [en, ru] of [['Marvin Branagh','Марвин Бранаг'],['Marvin Branagh','Марвин Брана'],['Claire Redfield','Клэр Редфилд'],['Michael Keller','Майкл Келлер'],['Leon Kennedy','Леон Кеннеди']]) {
+        assert.equal(a.api.personKey(en), a.api.personKey(ru));
+    }
+    assert.notEqual(a.api.personKey('Claire Redfield'), a.api.personKey('Claire Smith'));
+    assert.notEqual(a.api.personKey('田中'), a.api.personKey('山田'));
+});
+test('saved English and Russian cast has one avatar per person, without changing post text', () => {
+    const a = app();
+    a.s.lorePeople = [
+        {name:'Marvin Branagh',role:'student',bio:'Police'}, {name:'Марвин Бранаг',role:'student',species:'человек'},
+        {name:'Claire Redfield',role:'student'}, {name:'Клэр Редфилд',role:'student'},
+        {name:'Michael Keller',role:'student'}, {name:'Майкл Келлер',role:'student'},
+    ];
+    a.s.feed = a.s.lorePeople.map((p,i)=>({id:'p'+i,author:p.name,text:'Original '+i,t:BASE,comments:[]}));
+    a.s.feed[0].comments.push({author:'Claire',replyTo:'Marvin',text:'@Marvin Great!',t:BASE});
+    a.s.social.following = ['Marvin Branagh','Марвин Бранаг'];
+    a.s.stories = [{cast:['Claire','Клэр Редфилд']}];
+    a.api.S();
+    assert.equal(a.s.lorePeople.length,3);
+    assert.deepEqual(Array.from(a.s.feed,p=>p.text), ['Original 0','Original 1','Original 2','Original 3','Original 4','Original 5']);
+    assert.equal(a.s.feed[0].author,'Марвин Бранаг');
+    assert.equal(a.s.feed[0].comments[0].author,'Клэр Редфилд');
+    assert.equal(a.s.feed[0].comments[0].replyTo,'Марвин Бранаг');
+    assert.equal(a.s.feed[0].comments[0].text,'@Marvin Great!');
+    assert.equal(a.s.social.following.length,1); assert.equal(a.s.stories[0].cast.length,1);
+    const html = a.api.feedTab(a.s);
+    assert.equal((html.match(/class="sh-story"/g)||[]).length,3);
+    assert.equal(a.s.lorePeople[0].bio,'Police'); assert.equal(a.s.lorePeople[0].species,'человек');
+});
+test('short names resolve only when the full name is unambiguous and keep the surname', () => {
+    const a = app(); a.s.lorePeople=[{name:'Claire Redfield'},{name:'Claire Smith'}];
+    a.s.feed=[{author:'Клэр',comments:[]}]; a.api.S();
+    assert.equal(a.api.personName(a.s,'Claire'),'Клэр'); assert.equal(a.api.lorePerson(a.s,'Claire'),null);
+    assert.equal(a.s.lorePeople.length,2); assert.equal(a.api.samePerson(a.s,'Claire Redfield','Claire Smith'),false);
+    const b=app(); b.s.lorePeople=[{name:'Claire Redfield'}]; b.s.feed=[{author:'Клэр',comments:[]}]; b.api.S();
+    assert.equal(b.s.feed[0].author,'Claire Redfield');
+    assert.equal(b.api.personName(b.s,'Клэр'),'Claire Redfield');
+    b.s.profile.name='Claire'; b.api.S(); assert.equal(b.api.personName(b.s,'Claire'),'Claire');
+});
+test('localized duplicate private chats merge histories and references, preserving other chat kinds', () => {
+    const a=app();
+    const en={id:'en',kind:'dm',name:'Marvin Branagh',msgs:[{id:'m1',text:'Hello',t:1},{id:'m2',text:'Again',t:3}],t:3,unread:2,bio:'police',pendingReply:{at:500,initiate:'hi'}};
+    const ru={id:'ru',kind:'dm',name:'Марвин Бранаг',msgs:[{id:'m1',text:'Hello',t:1},{id:'m2',text:'Different',t:4},{text:'Again',t:5}],t:5,unread:1,pendingReply:{at:600,userKey:'old'},sceneContact:{state:'apart'},relSyncKey:'stale'};
+    const group={id:'g',kind:'group',name:'Marvin Branagh',msgs:[]}, official={id:'o',kind:'official',name:'Marvin Branagh',msgs:[]};
+    a.s.threads.push(en,ru,group,official); a.s.meetings=[{with:en.name,threadId:'en'}]; a.s.notes=[{go:{view:'thread',param:'en'}}]; a.s.strikes=[{letter:'en'}];
+    a.api.ui.view='thread'; a.api.ui.param='en'; a.api.S();
+    assert.equal(a.s.threads.includes(en),false); assert.equal(a.s.threads.includes(group),true); assert.equal(a.s.threads.includes(official),true);
+    assert.deepEqual(Array.from(ru.msgs,m=>m.text),['Hello','Again','Different','Again']);
+    assert.equal(ru.unread,3); assert.equal(ru.bio,'police'); assert.equal(ru.pendingReply.at,600);
+    assert.equal(ru.sceneContact,undefined); assert.equal(ru.relSyncKey,undefined);
+    assert.equal(a.s.meetings[0].threadId,'ru'); assert.equal(a.s.notes[0].go.param,'ru'); assert.equal(a.s.strikes[0].letter,'ru'); assert.equal(a.api.ui.param,'ru');
+    assert.equal(a.api.openThread(a.s,'Marvin Branagh'),ru);
+    assert.equal(a.api.openThread(a.s,'Marvin Branagh','','','group'),group);
+});
+test('active duplicate chats wait until generation ends before merging', () => {
+    for(const flag of ['typing','relSyncing']) {
+        const a=app(), en={id:'en',kind:'dm',name:'Claire Redfield',msgs:[],[flag]:true}, ru={id:'ru',kind:'dm',name:'Клэр Редфилд',msgs:[]};
+        a.s.threads.push(en,ru); a.api.S(); assert.equal(a.s.threads.length,3);
+        en[flag]=false; a.api.S(); assert.equal(a.s.threads.length,2);
+    }
+});
+test('language variants share online state and preserve current physical proximity proof', () => {
+    const a=app(), key=a.api.storySyncKey();
+    a.s.lorePeople=[{name:'Claire Redfield'},{name:'Клэр Редфилд'}];
+    a.s.messenger={presence:{
+        'p:claire redfield':{online:false,until:a.wall()+MIN,nearby:true,nearbySourceKey:key},
+        'p:клэр редфилд':{online:true,until:a.wall()+MIN,sourceKey:key,nearby:false}
+    }};
+    a.api.S();
+    const p=a.api.presenceFor(a.s,'Claire Redfield');
+    assert.equal(p,a.api.presenceFor(a.s,'Клэр Редфилд')); assert.equal(p.nearby,true); assert.equal(p.nearbySourceKey,key);
+    assert.equal(Object.keys(a.s.messenger.presence).length,1);
+});
+test('dating, meetings and subscriptions reuse the same localized person', () => {
+    const a=app(); a.s.dating.profiles=[{name:'Claire Redfield'},{name:'Клэр Редфилд'}];
+    a.s.dating.matches=[{name:'Claire Redfield'},{name:'Клэр Редфилд'}];
+    a.s.meetings=[{with:'Claire Redfield'}]; a.s.pendingDMs=[{from:'Claire'}]; a.s.jealousy=[{with:'Claire Redfield'}]; a.api.S();
+    assert.equal(a.s.dating.profiles.length,1); assert.equal(a.s.dating.matches.length,1);
+    assert.equal(a.s.meetings[0].with,'Клэр Редфилд'); assert.equal(a.s.pendingDMs[0].from,'Клэр Редфилд'); assert.equal(a.s.jealousy[0].with,'Клэр Редфилд');
+    a.api.ACT.follow({name:'Claire Redfield'},null,a.s); assert.equal(a.s.social.following.length,1);
+    a.api.ACT.follow({name:'Клэр Редфилд'},null,a.s); assert.equal(a.s.social.following.length,0);
+});
+test('stored aliases survive reloads, remain idempotent and do not leak to another chat', () => {
+    const a=app(); a.s.lorePeople=[{name:'Marvin Branagh'},{name:'Марвин Бранаг'}]; a.api.S();
+    const first=JSON.stringify(a.s); a.api.S(); assert.equal(JSON.stringify(a.s),first);
+    a.context.chatMetadata.unihub=JSON.parse(first); const restored=a.api.S();
+    assert.equal(a.api.personName(restored,'Marvin Branagh'),'Марвин Бранаг');
+    a.context.chatMetadata={}; a.context.chatId='other'; const other=a.api.S();
+    assert.equal(a.api.personName(other,'Marvin Branagh'),'Marvin Branagh');
+});
+test('localized NPC followups are deduplicated and names in the main card do not make them char', () => {
+    const a=app(); a.context.characters[0].description='Алекс дружит с Claire Redfield и Marvin Branagh';
+    a.s.lorePeople=[{name:'Claire Redfield'},{name:'Клэр Редфилд'}]; a.api.S();
+    a.api.scheduleDM(a.s,{from:'Claire Redfield',is_char:true},'','first');
+    a.api.scheduleDM(a.s,{from:'Клэр Редфилд'},'','second');
+    assert.equal(a.s.pendingDMs.length,1); assert.equal(a.s.pendingDMs[0].from,'Клэр Редфилд'); assert.equal(a.s.pendingDMs[0].isChar,false);
+    assert.equal(a.api.looksLikeChar('Claire Redfield'),false); assert.equal(a.api.looksLikeChar('Алекс'),true);
+});
+test('new generated replies reuse canonical authors and saved bilingual mentions render once', async () => {
+    const a=app(); a.s.lorePeople=[{name:'Claire Redfield'},{name:'Клэр Редфилд'}]; a.api.S();
+    a.answer(()=>[{author:'Claire Redfield',replyTo:'Claire',text:'@Claire Redfield Привет!'}]);
+    const list=await a.api.aiComments(a.s,{author:'Клэр Редфилд',text:'Hi',comments:[]},'Reply');
+    assert.equal(list[0].author,'Клэр Редфилд'); assert.equal(list[0].replyTo,'Клэр Редфилд');
+    const c={id:'c',author:'Алекс',replyTo:'Клэр Редфилд',text:'@Claire Redfield Привет!',t:BASE};
+    const html=a.api.commentHTML(c,{id:'p'}); assert.equal((html.match(/@/g)||[]).length,1); assert.match(html,/Привет!/); assert.equal(c.text,'@Claire Redfield Привет!');
+});
 function writeDM(a, text = 'Привет!') {
     a.elements['sh-msg'] = { value: text };
     return a.api.ACT.send({ id: a.th.id }, null, a.s);
@@ -606,6 +714,12 @@ function leonDate(kind = 'char') {
     a.sceneAnswer(() => ({ state: 'together', evidence: 'он держал её за руку' }));
     return a;
 }
+test('English duplicate cannot bypass Leon shared-scene protection after merging', async () => {
+    const a=leonDate(); const duplicate={id:'en',kind:'dm',name:'Leon Kennedy',msgs:[],t:a.wall()+1}; a.s.threads.push(duplicate); a.api.S();
+    assert.equal(a.s.threads.length,1); assert.equal(a.api.openThread(a.s,'Leon Kennedy'),a.th);
+    a.api.startDM(a.s,{from:'Leon Kennedy',context:'comment',intent:'Ask about Thursday'});
+    await a.api.drainQueue(); assert.equal(a.calls.length,0); assert.equal(a.th.msgs.length,0);
+});
 test('Leon cannot initiate a Thursday invitation during their date, despite missing presence metadata', async () => {
     const a = leonDate(); a.api.cfg().proactiveDMs = true; a.api.messengerState(a.s).nextInitiativeAt = a.wall();
     a.answer(() => ({ reply: 'Будешь свободна в четверг?' }));
