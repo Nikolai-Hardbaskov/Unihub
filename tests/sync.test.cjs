@@ -54,6 +54,100 @@ function app() {
         add: (mes, is_user = false) => { context.chat.push({ name: is_user ? 'Студент' : 'Алекс', mes, is_user, send_date: 'm' + context.chat.length }); return context.chat.length - 1; },
     };
 }
+test('relationship block at the end of a long card establishes the couple without phone messages', async () => {
+    const a=app(); a.context.name1='Arisha'; a.s.profile.name='Ариша';
+    a.context.characters[0]={data:{description:'APPEARANCE: '+ 'Detail. '.repeat(1100)+"RELATIONSHIPS: {{user}} is his girlfriend; they've been dating for quite some time and are in a serious relationship.",personality:'Kind.',scenario:'On duty.'}};
+    const evidence="Arisha is his girlfriend; they've been dating for quite some time and are in a serious relationship.";
+    a.answer(prompt=>{
+        assert.ok(prompt.includes(evidence)); assert.match(prompt,/personality: Kind\./); assert.match(prompt,/scenario: On duty\./);
+        assert.match(prompt,/Arisha и профиль UniHub Ариша — один человек/);
+        return {card_known:true,card_pair:true,card_evidence:evidence,known:false,rel:0,status:'не знакомы',pair:false,note:'Нет сообщений'};
+    });
+    await a.api.syncRel(a.s,a.th);
+    assert.equal(a.th.pair,true); assert.equal(a.th.known,true); assert.equal(a.th.status,'пара'); assert.equal(a.s.profile.relWithChar,true);
+    assert.equal(a.th.msgs.length,0); assert.match(a.th.relNote,/girlfriend/);
+});
+test('no romance in a short chat cannot clear an existing or manually marked couple', async () => {
+    for(const mode of ['existing','manual']) {
+        const a=app(); a.th.known=true; a.th.rel=75; a.th.status='пара'; a.th.relNote='Давно вместе';
+        if(mode==='existing') a.th.pair=true; else a.s.profile.relWithChar=true;
+        a.answer(()=>({known:false,rel:0,status:'не знакомы',pair:false,note:'Не флиртовали в последних сообщениях'}));
+        await a.api.syncRel(a.s,a.th);
+        assert.equal(a.th.pair,true); assert.equal(a.th.known,true); assert.equal(a.th.status,'пара'); assert.equal(a.th.rel,75); assert.equal(a.s.profile.relWithChar,true);
+        assert.equal(a.th.relNote,'Давно вместе');
+    }
+});
+test('missing or unknown pair fields do not mean breakup', async () => {
+    for(const extra of [{},{pair:null},{pair:false},{pair:'false'}]) {
+        const a=app(); a.th.pair=true; a.s.profile.relWithChar=true; a.answer(()=>({rel:60,status:'друзья',...extra}));
+        await a.api.syncRel(a.s,a.th); assert.equal(a.th.pair,true); assert.equal(a.s.profile.relWithChar,true); assert.equal(a.th.status,'пара');
+    }
+});
+test('grounded breakup in the story overrides a couple from the card and survives short context', async () => {
+    const a=app(), card='Студент — его девушка, они давно в отношениях.', ending='Алекс и Студент расстались и решили больше не быть парой.';
+    a.context.characters[0].description=card; a.th.pair=true; a.s.profile.relWithChar=true;
+    a.add(ending); a.answer(()=>({card_known:true,card_pair:true,card_evidence:card,known:true,rel:20,status:'знакомые',pair:false,pair_evidence:{source:'story',text:ending}}));
+    await a.api.syncRel(a.s,a.th); assert.equal(a.th.pair,false); assert.equal(a.s.profile.relWithChar,false);
+    for(let i=0;i<31;i++) a.add('Рабочий день '+i);
+    a.context.characters[0].personality='Another card detail';
+    a.answer(()=>({card_known:true,card_pair:true,card_evidence:card,known:true,rel:20,status:'знакомые',pair:true,pair_evidence:{source:'card',text:card}}));
+    await a.api.syncRel(a.s,a.th); assert.equal(a.th.pair,false); assert.equal(a.s.profile.relWithChar,false); assert.equal(a.th.known,true);
+});
+test('removing a breakup by swipe restores the unchanged card relationship', async () => {
+    const a=app(), card='{{user}} is his girlfriend.', quote='Студент is his girlfriend.', ending='Мы расстались.';
+    a.context.characters[0].description=card; const id=a.add(ending);
+    a.answer(()=>({card_known:true,card_pair:true,card_evidence:quote,known:true,pair:false,pair_evidence:{source:'story',text:ending}}));
+    await a.api.syncRel(a.s,a.th); assert.equal(a.th.pair,false);
+    a.context.chat[id].mes='Мы пошли домой.'; a.context.chat[id].swipe_id=1;
+    a.answer(()=>({known:true,pair:null,status:'знакомые'}));
+    await a.api.syncRel(a.s,a.th); assert.equal(a.th.pair,true); assert.equal(a.s.profile.relWithChar,true);
+});
+test('invented breakup quotes, busy scenes, denied breakups and hypothetical events cannot clear a couple', async () => {
+    for(const text of ['Я занят на работе.','Я не смогу встретиться в четверг.','Мы не расстались.','We did not break up.','If we break up, I will be sad.','We might break up.','Мы расстались.']) {
+        const a=app(); a.th.pair=true; a.s.profile.relWithChar=true;
+        if(text!=='Мы расстались.') a.add(text);
+        a.answer(()=>({known:true,pair:false,rel:30,status:'знакомые',pair_evidence:{source:'story',text}}));
+        await a.api.syncRel(a.s,a.th); assert.equal(a.th.pair,true,text); assert.equal(a.s.profile.relWithChar,true,text);
+    }
+});
+test('a grounded breakup in the private chat is accepted but ordinary arguments keep pair status', async () => {
+    const a=app(); a.th.pair=true; a.s.profile.relWithChar=true; a.th.msgs=[{me:false,text:'Мы поссорились, я злюсь на тебя.',t:1}];
+    a.answer(()=>({known:true,pair:false,rel:-30,status:'в ссоре',note:'Ссора',pair_evidence:{source:'dm',text:a.th.msgs[0].text}}));
+    await a.api.syncRel(a.s,a.th); assert.equal(a.th.pair,true); assert.equal(a.th.rel,-30);
+    a.th.msgs.push({me:false,text:'Мы больше не встречаемся.',t:2});
+    a.answer(()=>({known:true,pair:false,rel:-30,status:'неприязнь',pair_evidence:{source:'dm',text:'Мы больше не встречаемся.'}}));
+    await a.api.syncRel(a.s,a.th); assert.equal(a.th.pair,false); assert.equal(a.s.profile.relWithChar,false);
+});
+test('a reconciliation event can restore a previously broken couple', async () => {
+    const a=app(); const ending='We broke up.', reunion='We are dating again.'; a.add(ending);
+    a.answer(()=>({known:true,pair:false,pair_evidence:{source:'story',text:ending}})); await a.api.syncRel(a.s,a.th);
+    a.add(reunion); a.answer(()=>({known:true,pair:true,status:'пара',pair_evidence:{source:'story',text:reunion}}));
+    await a.api.syncRel(a.s,a.th); assert.equal(a.th.pair,true); assert.equal(a.s.profile.relWithChar,true);
+});
+test('editing only the tail of the card invalidates relationship synchronization', async () => {
+    const a=app(); a.context.characters[0].description='Detail. '.repeat(1000)+'No relationship.';
+    a.answer(()=>({known:false,pair:null})); await a.api.syncRel(a.s,a.th); assert.equal(a.api.needsRelSync(a.s,a.th),false);
+    a.context.characters[0].description='Detail. '.repeat(1000)+'{{user}} is his girlfriend.';
+    assert.equal(a.api.needsRelSync(a.s,a.th),true);
+    a.answer(()=>({card_known:true,card_pair:true,card_evidence:'Студент is his girlfriend.',known:true,pair:true,pair_evidence:{source:'card',text:'Студент is his girlfriend.'}}));
+    await a.api.syncRel(a.s,a.th); assert.equal(a.th.pair,true);
+});
+test('speech examples and invented card quotes cannot establish a couple', async () => {
+    const a=app(); a.context.characters[0]={description:'Friendly student.',mes_example:'{{user}} is his girlfriend.'};
+    a.answer(()=>({card_known:true,card_pair:true,card_evidence:'Студент is his girlfriend.',pair:true,pair_evidence:{source:'card',text:'Студент is his girlfriend.'}}));
+    await a.api.syncRel(a.s,a.th); assert.equal(a.th.pair,false); assert.equal(a.s.profile.relWithChar,false);
+    for(const card of ['{{user}} is not his girlfriend; they are not dating.','{{user}} is not his girlfriend.','He hopes {{user}} will be his girlfriend.']) {
+        const b=app(); b.context.characters[0].description=card; const quote=card.replace('{{user}}','Студент');
+        b.answer(()=>({card_pair:true,card_evidence:quote,pair:true,pair_evidence:{source:'card',text:quote}}));
+        await b.api.syncRel(b.s,b.th); assert.equal(b.th.pair,false,card);
+    }
+});
+test('new card relationship result is discarded after a card edit during the request', async () => {
+    const a=app(), d=defer(); a.context.characters[0].description='{{user}} is his girlfriend.'; a.answer(()=>d.promise);
+    const running=a.api.syncRel(a.s,a.th); a.context.characters[0].description='Strangers.';
+    d.resolve({card_known:true,card_pair:true,card_evidence:'Студент is his girlfriend.',known:true,pair:true,pair_evidence:{source:'card',text:'Студент is his girlfriend.'}});
+    await running; assert.equal(a.th.pair,undefined); assert.equal(a.s.profile.relWithChar,false);
+});
 test('closed phone: relationships follow new messages, same-length edits, swipes, deletion', async () => {
     const a = app(); a.api.cfg().syncAI = false;
     let rel = 20; a.answer(async () => ({ known: true, rel, status: 'приятели' }));

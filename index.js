@@ -1233,8 +1233,30 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         return JSON.stringify((ctx().chat || []).filter((m) => m && !m.is_system).slice(-30)
             .map((m) => [m.name, !!m.is_user, m.swipe_id, m.mes]));
     }
+    /** Для проверки отношений карточка и реплики передаются целиком, без обрезки хвоста. */
+    function relationshipSources(s, th) {
+        const c = ctx(), ch = c.characters?.[c.characterId], lp = lorePerson(s, th.name);
+        const card = th.kind === 'char'
+            ? ['description','personality','scenario'].map(k => field(ch,k) ? `${k}: ${macros(field(ch,k))}` : '').filter(Boolean).join('\n')
+            : `${th.bio || ''}${lp ? `\nИз лора: ${lp.bio || ''}${lp.relation ? `; для ${c.name2}: ${lp.relation}` : ''}` : ''}`;
+        const messages = (ctx().chat || []).filter(m => m && !m.is_system && m.mes).slice(-20);
+        return { card, story: messages.map(m => `${m.name}: ${m.mes}`).join('\n'),
+            dm: th.msgs.filter(m => !m.sys).slice(-10).map(m => `${m.me ? s.profile.name : th.name}: ${m.text}`).join('\n') };
+    }
+    const relationshipText = value => String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    function relationshipEvidence(evidence, sources, pair) {
+        if (!evidence || !['card','story','dm'].includes(evidence.source)) return '';
+        const quote = relationshipText(evidence.text);
+        if (quote.length < 8 || !relationshipText(sources[evidence.source]).includes(quote)) return '';
+        // Отсутствие флирта, занятость и ссора сами по себе не являются расставанием.
+        const ended = /broke\s+up|break(?:ing)?\s+up|broken\s+up|no\s+longer.{0,35}(?:dating|together|relationship|couple)|(?:not|isn.t|aren.t|weren.t).{0,25}(?:dating|a\s+couple|in\s+a\s+(?:romantic\s+)?relationship|(?:his|her|my|your|their)\s+(?:girlfriend|boyfriend|partner|wife|husband))|relationship.{0,25}(?:ended|over)|ex[-\s](?:girlfriend|boyfriend|partner|wife|husband)|расста(?:лись|лся|лась|ёмся|емся|ются)|разошлись|развелись|развод|не\s+пара|не\s+(?:его|её|ее|моя|мой|твоя|твой)\s+(?:девушка|парень|жена|муж)|не\s+встреча(?:емся|ются|ется|юсь)|отношени.{0,25}(?:законч|прекрат|разорв)|(?:бывш|больше\s+не).{0,20}(?:девушк|парень|парня|супруг|жен[аы]|муж|вместе)/i;
+        if (!pair && /(?:не\s+(?:расста|разош|развел|законч|прекрат|разорв)|(?:did\s+not|didn't|never|haven't|not|won't|might|could|may|if).{0,20}(?:break\s+up|broke\s+up|broken\s+up|divorc)|если.{0,30}(?:расста|развод))/i.test(quote)) return '';
+        if (pair && /(?:hopes?|wants?|wishes?|pretends?|if|would\s+like).{0,50}(?:girlfriend|boyfriend|dating|relationship)|(?:хочет|мечтает|если).{0,50}(?:девушк|парень|отношени|встреча)/i.test(quote)) return '';
+        const together = /girlfriend|boyfriend|partner|wife|husband|dating|relationship|married|пара|девушк|парень|парня|встреча(?:ются|емся|ется|юсь)|отношени|жен[аы]|муж|супруг/i;
+        return (pair ? together.test(quote) && !ended.test(quote) : ended.test(quote)) ? quote : '';
+    }
     function relationSyncKey(th) {
-        return String(hash(JSON.stringify([storySyncKey(), charCard(), th.bio, lorePerson(S(), th.name),
+        return String(hash(JSON.stringify(['relationships-v2', storySyncKey(), relationshipSources(S(),th).card, charCard(), th.bio, lorePerson(S(), th.name),
             th.msgs.filter((m) => !m.sys).slice(-10).map((m) => [m.me, m.text])])));
     }
     /** Определяет текущие отношения по карточке, основной истории и переписке (история важнее карточки). */
@@ -1244,28 +1266,72 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         const clockMode = s.clock?.mode;
         th.relSyncing = true; render();
         try {
-            const c = ctx(), ch = c.characters?.[c.characterId];
-            const lp = lorePerson(s, th.name);
-            const about = th.kind === 'char'
-                ? `${charCard()}${field(ch, 'first_mes') ? `\nПервое сообщение истории: ${macros(field(ch, 'first_mes')).slice(0, 1200)}` : ''}`
-                : `${th.name}${th.species ? ` (${th.species})` : ''}. ${th.bio || ''}${lp ? ` Из лора: ${lp.bio}${lp.relation ? `; для ${c.name2}: ${lp.relation}` : ''}.` : ''}`;
-            const dms = th.msgs.filter((m) => !m.sys).slice(-10).map((m) => `${m.me ? s.profile.name : th.name}: ${m.text}`).join('\n');
-            const r = await aiJSON(`${about}\n\nПоследние события основной истории:\n${recentStory(20) || '(истории пока нет)'}\n\nПереписка в UniHub:\n${dms || '(не переписывались)'}${th.contactContext ? `\nЗнакомство в UniHub: ${th.contactContext}` : ''}\n\nОпредели, какие СЕЙЧАС отношения у ${th.name} с ${s.profile.name}. Опирайся на факты: история и переписка важнее карточки — если по карточке они не знакомы, а в истории уже подружились или начали встречаться, верь истории. Если они ещё ни разу не общались и не знакомы — known: false.\nФормат: {"known":true,"rel":число от −100 (вражда) до 100 (самые близкие),"status":"короткий статус по-русски: не знакомы, знакомые, приятели, друзья, близкие друзья, флирт, пара, соперники, неприязнь, вражда…","pair":true если они сейчас в романтических отношениях,"note":"одной фразой, на чём основан вывод","presence":{"busy":false,"sleeping":false,"nearby":false,"minutes":30,"reason":""}}\nПоле presence: по текущей сцене, а не прошлым планам, занят ли собеседник сейчас (работает, учится, за рулём и т.п.), спит ли он, находится ли рядом с пользователем; minutes — примерный остаток занятости в минутах истории. Если подтверждения занятости нет, busy и sleeping false. nearby true только если прямо сейчас они в одном месте. Не придумывай распорядок из профессии или карточки.`);
+            const c = ctx(), sources = relationshipSources(s,th);
+            const cardKey = String(hash(sources.card));
+            const r = await aiJSON(`Собеседник: ${th.name}. Пользователь основного чата ${c.name1 || s.profile.name} и профиль UniHub ${s.profile.name} — один человек. Подставленный в карточку {{user}} обозначает именно пользователя. Определяй отношения только этой пары людей, а не отношения NPC с основным персонажем.
+Карточка / данные собеседника (полные поля, без примеров диалога):
+${sources.card || '(нет данных)'}
+
+Последние события основной истории:
+${sources.story || '(истории пока нет)'}
+
+Переписка в UniHub:
+${sources.dm || '(не переписывались)'}${th.contactContext ? `\nЗнакомство в UniHub: ${th.contactContext}` : ''}
+
+Определи, какие СЕЙЧАС отношения у ${th.name} с ${s.profile.name}.
+Карточка задаёт исходные факты отношений: если пользователь уже девушка, парень, супруг или постоянный партнёр персонажа, они знакомы и являются парой с начала истории. Не требуй знакомства или признания заново. Сначала отдельно выпиши card_known, card_pair и точную цитату card_evidence из полей карточки. Общие предпочтения, желания, примеры речи и отношения с другим человеком не подтверждают пару с пользователем.
+История и переписка меняют исходные отношения только конкретными событиями: началом отношений, расставанием, разводом и т.п. Отсутствие романтики в последних сообщениях, работа, расстояние, краткий чат, пустая переписка UniHub или ссора НЕ означают, что пара распалась или люди не знакомы.
+Для pair дай pair_evidence с source: card, story или dm и дословной цитатой о статусе или изменении отношений именно этих двух людей. Цитата про отказ от конкретной встречи не является расставанием. При недостатке данных pair: null и known: null; неизвестность не равна false. Если пара уже распалась в истории, старая карточка сама по себе не восстанавливает отношения. Недавние воспоминания, предположения, планы и реплики о чужих отношениях не являются изменением статуса.
+Формат: {"card_known":true или false или null,"card_pair":true или false или null,"card_evidence":"точная цитата карточки или пусто","known":true или false или null,"rel":число от −100 (вражда) до 100 (самые близкие),"status":"короткий статус по-русски","pair":true или false или null,"pair_evidence":{"source":"card, story или dm","text":"точная цитата или пусто"},"note":"одной фразой, на чём основан вывод","presence":{"busy":false,"sleeping":false,"nearby":false,"minutes":30,"reason":""}}
+Поле presence: по текущей сцене, а не прошлым планам, занят ли собеседник сейчас (работает, учится, за рулём и т.п.), спит ли он, находится ли рядом с пользователем; minutes — примерный остаток занятости в минутах истории. Если подтверждения занятости нет, busy и sleeping false. nearby true только если прямо сейчас они в одном месте. Не придумывай распорядок из профессии или карточки.`);
             if (S() !== s || relationSyncKey(th) !== syncKey || s.clock?.mode !== clockMode || !r || typeof r !== 'object') return;
             applyPresence(s, th, r.presence);
-            th.known = r.known !== false;
-            th.rel = clamp(Math.round(+r.rel || 0), -100, 100);
+            if (Array.isArray(r)) return;
+            const cardQuote = relationshipText(r.card_evidence);
+            if (th.relCardBaseline?.key !== cardKey) th.relCardBaseline = { key: cardKey };
+            if (cardQuote.length >= 8 && relationshipText(sources.card).includes(cardQuote)) {
+                if (r.card_known === true) th.relCardBaseline.known = true;
+                if (r.card_pair === true && relationshipEvidence({source:'card',text:cardQuote},sources,true)
+                    && !relationshipEvidence({source:'card',text:cardQuote},sources,false)) {
+                    th.relCardBaseline.pair = true; th.relCardBaseline.known = true; th.relCardBaseline.note = cardQuote;
+                }
+            }
+            const baseline = th.relCardBaseline;
+            const allSources = { ...sources,
+                story: (ctx().chat || []).filter(m=>m && !m.is_system).map(m=>m.mes || '').join('\n'),
+                dm: th.msgs.filter(m=>!m.sys).map(m=>m.text || '').join('\n') };
+            const oldDecision = th.relPairDecision;
+            let decision = oldDecision;
+            if (decision && !relationshipEvidence(decision,allSources,decision.pair)) {
+                decision = undefined; delete th.relPairDecision;
+            }
+            const wasPair = (th.pair === true || (th.kind === 'char' && s.profile.relWithChar)) && !(oldDecision?.pair === true && !decision);
+            let pair = decision?.pair ?? (wasPair || baseline.pair === true);
+            const value = r.pair === true || r.pair === 'true' ? true : r.pair === false || r.pair === 'false' ? false : null;
+            const quote = value !== null ? relationshipEvidence(r.pair_evidence,sources,value) : '';
+            if (quote && (r.pair_evidence.source !== 'card' || (!wasPair && decision?.pair !== false))) {
+                pair = value;
+                if (r.pair_evidence.source !== 'card') th.relPairDecision = { pair, cardKey, source:r.pair_evidence.source, text:quote };
+            }
+            th.pair = pair;
+            if (pair || baseline.known === true || th.known === true || th.msgs.some(m=>m.me && !m.sys) || r.known === true) th.known = true;
+            else if (r.known === false) th.known = false;
+            const unsupportedStrangers = r.known === false && th.known === true && !quote;
+            if (!unsupportedStrangers && r.rel !== null && r.rel !== undefined && r.rel !== '' && Number.isFinite(Number(r.rel))) th.rel = clamp(Math.round(+r.rel), -100, 100);
             th.relAtSync = th.rel;
             if (th.rel > -10 && th.conflict) { th.reconciled = { why: th.conflict.why, t: NOW() }; th.conflict = null; }
             if (th.rel <= -20 && !th.conflict) th.conflict = { why: cleanMsg(r.note || 'конфликт в истории').slice(0, 220), t: NOW(), low: th.rel };
-            th.status = th.known ? cleanMsg(r.status || '').slice(0, 30).toLowerCase() : 'не знакомы';
-            th.relNote = cleanMsg(r.note || '').slice(0, 200);
-            th.pair = r.pair === true || r.pair === 'true';
+            let status = cleanMsg(r.status || th.status || '').slice(0,30).toLowerCase();
+            if (pair && /^(?:не знакомы|знакомые|приятели|друзья|близкие друзья|флирт|не пара)?$/.test(status)) status = 'пара';
+            if (th.known && status === 'не знакомы') status = pair ? 'пара' : 'знакомые';
+            if (!pair && status === 'пара') status = 'знакомые';
+            th.status = th.known ? status : 'не знакомы';
+            th.relNote = cleanMsg(pair && value !== true ? baseline.note || th.relNote || 'Романтические отношения подтверждены ранее.' : r.note || th.relNote || '').slice(0,200);
             th.relSyncLen = (ctx().chat || []).length;
             th.relSyncKey = syncKey;
             if (th.kind === 'char' && th.pair !== !!s.profile.relWithChar) {
                 s.profile.relWithChar = th.pair;
-                notify(s, th.pair ? `💞 По истории вы с ${th.name} — пара. Отмечено в профиле.` : `По истории вы с ${th.name} сейчас не пара. Отметка в профиле снята.`, 'social');
+                notify(s, th.pair ? `💞 По карточке и истории вы с ${th.name} — пара. Отмечено в профиле.` : `По истории вы с ${th.name} сейчас не пара. Отметка в профиле снята.`, 'social');
             }
             save(s);
         } finally { th.relSyncing = false; render(); }
@@ -2534,7 +2600,7 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.17.2 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.17.3 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
