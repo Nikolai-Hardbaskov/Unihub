@@ -6,7 +6,7 @@ const source = fs.readFileSync(__dirname + '/../index.js', 'utf8');
 const MIN = 60000;
 const BASE = new Date(2026, 0, 5, 10).getTime();
 const defer = () => { let resolve; const promise = new Promise(r => resolve = r); return { promise, resolve }; };
-function app() {
+function app(options = {}) {
     const timers = new Map(), events = new Map(), calls = [], sceneCalls = [], prompts = [], elements = {};
     let wallNow = Date.now(), random = () => Math.random();
     const fakeMath = Object.create(Math); fakeMath.random = () => random();
@@ -24,18 +24,21 @@ function app() {
     };
     const box = {
         SillyTavern: { getContext: () => context }, Date: FakeDate, Math: fakeMath,
-        window: { addEventListener() {} }, document: { getElementById: id => elements[id] || null, querySelector: () => null }, navigator: {}, console,
+        window: { addEventListener() {}, localStorage: options.storage }, document: { getElementById: id => elements[id] || null, querySelector: () => null }, navigator: {}, console, confirm: () => true,
         jQuery() {},
         setTimeout: (fn, ms) => { const id = nextTimer++; timers.set(id, { fn, ms }); return id; },
         clearTimeout: id => timers.delete(id),
     };
     const exposed = `
+    const realRender = render, realTick = tick, realNotify = notify;
     render = () => {}; tick = () => {}; notify = () => {};
     globalThis.testApi = { cfg, S, save, syncRel, needsRelSync, storySyncKey, storySyncState,
         scheduleStorySync, flushStorySync, onStoryReply, buildInjection, bindStoryEvents,
         setClock, aiRaw, onChatChanged, readHorae, parseStoryTime, syncHoraeClock, pollHoraeClock,
         readChatClock, guessedStoryClock, hasStoryProgress, refreshQuests, makeQuest, questEvent, fireHook, stripMention, commentHTML, aiComments, ACT, ui, questHTML, questScopeReady, drainQueue: () => queue,
         queueMessengerReply, tickMessenger, presenceFor, applyPresence, planInitiative, presenceDot, chatsTab, threadView, messengerState, startDM, sceneContactKey, sceneContactState, checkSceneContact, reply, startMeeting, personKey, personName, samePerson, normaliseIdentities, lorePerson, openThread, feedTab, personView, scheduleDM, looksLikeChar, voiceContext, rememberVoices, extractLorePeople, updateRel, cancelUser,
+        realRender, realTick, realNotify, screenHTML, cleanReply, loreText, loreFor, enqueue, genSchedule, occurrences, stampGame, taskView, rating, validSetting, onChange, priceOf, placeFoodOrder, pay, tx, genTaskDesc, updateInjection,
+        setWorldInfo: value => { worldInfoModulePromise = Promise.resolve(value); },
         setGenerating: value => { storyGenerating = value; }, getGenerating: () => storyGenerating };
     `;
     vm.runInNewContext(source.replace('    globalThis.UniHub =', exposed + '\n    globalThis.UniHub ='), box);
@@ -48,7 +51,7 @@ function app() {
     api.storySyncState(s);
     const names = ['CHAT_CHANGED', 'CHAT_LOADED', 'MESSAGE_RECEIVED', 'GENERATION_STARTED', 'GENERATION_ENDED', 'GENERATION_STOPPED', 'MESSAGE_EDITED', 'MESSAGE_UPDATED', 'MESSAGE_SWIPED', 'MESSAGE_SWIPE_DELETED', 'MESSAGE_DELETED', 'CHARACTER_MESSAGE_RENDERED', 'MESSAGE_SENT', 'USER_MESSAGE_RENDERED', 'MORE_MESSAGES_LOADED', 'CHARACTER_EDITED'];
     api.bindStoryEvents(context.eventSource, Object.fromEntries(names.map(n => [n, n])));
-    return { context, api, s, th, calls, sceneCalls, prompts, timers, elements, window: box.window,
+    return { context, api, s, th, calls, sceneCalls, prompts, timers, elements, window: box.window, document: box.document,
         answer: fn => { answer = fn; }, sceneAnswer: fn => { sceneAnswer = fn; }, setRandom: value => { random = typeof value === 'function' ? value : () => value; }, setWall: value => { wallNow = value; }, wall: () => wallNow, emit: (name, ...args) => events.get(name)?.(...args),
         flush: () => api.flushStorySync(api.S()),
         add: (mes, is_user = false) => { context.chat.push({ name: is_user ? 'Студент' : 'Алекс', mes, is_user, send_date: 'm' + context.chat.length }); return context.chat.length - 1; },
@@ -1015,6 +1018,250 @@ test('an invitation finishing after arrival cannot append a reply or change rela
     const a = messengerApp(), d = defer(); meetingForm(a); a.answer(() => d.promise);
     const run = a.api.ACT.proposeMeet({ id: a.th.id }, null, a.s);
     for (let i = 0; i < 30 && !a.calls.length; i++) await Promise.resolve(); assert.equal(a.calls.length, 1);
-    a.api.applyPresence(a.s, a.th, { busy: false, nearby: true }); d.resolve({ accept: true, reply: 'Давай в четверг' }); await run;
+    a.api.applyPresence(a.s, a.th, { busy: false, nearby: true }); d.resolve({ accept: true, reply: 'Давай в четверг' }); await run; await a.api.drainQueue();
     assert.equal(a.th.msgs.length, 1); assert.equal(a.s.meetings.length, 0); assert.equal(a.th.rel, 0); assert.equal(a.th.pendingReply.sceneWait, 'together');
+});
+
+function memoryStorage() {
+    const data = new Map();
+    return { getItem: key => data.get(key) || null, setItem: (key, value) => data.set(key, value), removeItem: key => data.delete(key), data };
+}
+async function started(a) { for (let i = 0; i < 60 && !a.calls.length; i++) await Promise.resolve(); assert.equal(a.calls.length, 1); }
+test('switching chat before debounce preserves old state without saving it into the new chat', async () => {
+    const storage = memoryStorage(), a = app({ storage }), saved = [];
+    a.context.saveMetadata = () => saved.push(a.context.chatId);
+    a.s.wallet.balance = 1234; a.api.save(a.s);
+    const timer = [...a.timers.values()].find(t => t.ms === 400);
+    a.context.chatId = 'b'; a.context.chatMetadata = {}; const b = a.api.S(); await timer.fn();
+    assert.deepEqual(saved, []); assert.notEqual(b.wallet.balance, 1234);
+    a.context.chatId = 'a'; a.context.chatMetadata = {}; const restored = a.api.S();
+    assert.equal(restored.wallet.balance, 1234); a.api.onChatChanged();
+    await [...a.timers.values()].filter(t => t.ms === 400).at(-1).fn();
+    assert.deepEqual(saved, ['a']); assert.equal(storage.data.size, 1);
+});
+test('pending save survives a page reload and account storage takes priority', () => {
+    const storage = memoryStorage(), local = memoryStorage(), a = app({ storage: local }); a.context.accountStorage = storage;
+    a.s.wallet.balance = 777; a.api.save(a.s); assert.equal(local.data.size, 0);
+    const b = app({ storage }); assert.equal(b.s.wallet.balance, 777);
+});
+test('reset removes pending backup instead of resurrecting previous data', () => {
+    const storage = memoryStorage(), a = app({ storage }); a.s.wallet.balance = 777; a.api.save(a.s);
+    a.api.ACT.resetChat(); const s = a.api.S(); assert.notEqual(s.wallet.balance, 777); assert.equal(s.auth, false);
+    const b = app({ storage }); assert.notEqual(b.s.wallet.balance, 777);
+});
+test('save failure keeps durable backup available for retry', async () => {
+    const storage = memoryStorage(), a = app({ storage }); a.context.saveMetadata = async () => { throw new Error('network'); };
+    a.s.wallet.balance = 321; a.api.save(a.s); await [...a.timers.values()].find(t => t.ms === 400).fn();
+    assert.equal(storage.data.size, 1); assert.equal(app({ storage }).s.wallet.balance, 321);
+});
+test('late tutor result neither changes discarded data nor clears a new operation', async () => {
+    const a = app(), old = defer(), current = defer(); a.elements['sh-tutor'] = { value: 'История' }; a.answer(() => old.promise);
+    const first = a.api.ACT.tutor({}, null, a.s); await started(a);
+    a.context.chatId = 'b'; a.context.chatMetadata = {}; a.api.onChatChanged(); const b = a.api.S(); b.auth = true;
+    a.answer(() => current.promise); const second = a.api.ACT.groups({}, null, b);
+    old.resolve({ name: 'Запоздалый репетитор' }); await first;
+    assert.equal(a.s.threads.length, 1); assert.equal(b.threads.length, 0); assert.equal(a.api.ui.view, null); assert.ok(a.api.ui.busy);
+    current.resolve([]); await second; assert.equal(a.api.ui.busy, '');
+});
+test('old hung queue and generation counter do not block a new chat', async () => {
+    const a = app(), d = defer(); a.answer(() => d.promise); a.api.enqueue(a.s, () => a.api.aiRaw('old')); await started(a);
+    a.context.chatId = 'b'; a.context.chatMetadata = {}; const b = a.api.S(); b.auth = true;
+    let ran = false; a.answer(() => 'new'); a.api.enqueue(b, async () => { ran = await a.api.aiRaw('new'); });
+    await a.api.drainQueue(); assert.equal(ran, '"new"'); d.resolve('old');
+});
+test('hung AI request times out and releases its queue for subsequent work', async () => {
+    const a = app(), d = defer(); let ran = false; a.answer(() => d.promise);
+    a.api.enqueue(a.s, () => a.api.aiRaw('hung')); await started(a);
+    a.api.enqueue(a.s, () => { ran = true; }); [...a.timers.values()].find(t => t.ms === 180000).fn();
+    await a.api.drainQueue(); assert.equal(ran, true); d.resolve('late');
+});
+test('late homework formulation does not mutate a discarded chat', async () => {
+    const a = app(), d = defer(), t = { id: 't', title: 'Original', subject: 'История', desc: '' };
+    a.s.tasks.push(t); a.answer(() => d.promise); a.api.genTaskDesc(a.s, t); await started(a);
+    a.context.chatId = 'b'; a.context.chatMetadata = {}; a.api.S(); d.resolve({ title: 'Late', desc: 'Late' });
+    await a.api.drainQueue(); assert.equal(t.title, 'Original'); assert.equal(t.desc, '');
+});
+test('initial clock synchronization aligns enrollment, quarter and stipend to story date', async () => {
+    const a = app(); a.setWall(new Date(2026, 9, 3, 9).getTime()); a.s.auth = false; a.s.world = 'mundane';
+    a.s.clock = { mode: 'game', t: a.wall(), source: 'старт' }; a.s.wallet.lastStipend = a.wall();
+    a.context.chat = [{ name: 'Алекс', mes: 'Время: 5 января 2026 10:00', send_date: 'first' }];
+    for (const [id, value] of Object.entries({ 'sh-a-name': 'Студент', 'sh-a-gender': 'f', 'sh-a-year': '1', 'sh-a-fac': 'История' })) a.elements[id] = { value };
+    a.answer(() => []); await a.api.ACT.login({}, null, a.s); await a.api.drainQueue(); await a.flush();
+    assert.equal(a.s.clock.t, BASE); assert.equal(a.s.enforceFrom, BASE); assert.equal(a.s.quarter.start, BASE); assert.equal(a.s.wallet.lastStipend, BASE);
+});
+test('legacy unsynchronized academic dates are repaired but manual or active histories are preserved', () => {
+    for (const preserve of ['', 'manual', 'grades']) {
+        const a = app(); a.s.clock.storyInitialized = true; a.s.enforceFrom = BASE + 100 * 1440 * MIN; a.s.quarter.start = a.s.enforceFrom; a.s.wallet.lastStipend = a.s.enforceFrom;
+        if (preserve === 'manual') a.s.clock.source = 'вручную'; if (preserve === 'grades') a.s.grades.push({ grade: 5 });
+        a.api.S(); assert.equal(a.s.enforceFrom === BASE, !preserve);
+    }
+});
+test('future meeting plans do not advance fallback story time', () => {
+    const a = app();
+    for (const text of ['Увидимся через три часа.', 'Я вернусь через час.', 'Если через два часа наступит вечер, поедем.']) assert.equal(a.api.guessedStoryClock(text, BASE) - BASE, a.api.cfg().stepMin * MIN);
+    assert.equal(a.api.guessedStoryClock('Спустя час он закончил работу.', BASE) - BASE, 60 * MIN);
+});
+test('fallback time does not count a previous assistant jump twice', async () => {
+    const a = app(); a.api.cfg().syncAI = false; a.s.clock.storyInitialized = true;
+    a.add('Я слушаю.', true); a.add('Спустя час он закончил работу.'); a.api.scheduleStorySync(true); await a.flush(); const first = a.s.clock.t;
+    assert.equal(first - BASE, 60 * MIN); a.add('Он убрал инструменты.'); a.api.scheduleStorySync(true); await a.flush();
+    assert.equal(a.s.clock.t - first, a.api.cfg().stepMin * MIN);
+});
+test('lore includes all enabled connected books and preserves the extraction tail', async () => {
+    const a = app(), loaded = []; a.context.characters[0].avatar = 'Alex.png';
+    a.context.characters[0].data = { extensions: { world: 'Primary' }, character_book: { entries: [{ keys: ['Катя'], content: 'EMBEDDED' }, { enabled: false, content: 'DISABLED-EMBEDDED' }] } };
+    a.context.chatMetadata.world_info = 'Chat'; a.context.powerUserSettings = { persona_description_lorebook: 'Persona' };
+    a.api.setWorldInfo({ selected_world_info: ['Global', 'Primary'], world_info: { charLore: [{ name: 'Alex', extraBooks: ['Extra'] }] } });
+    a.context.loadWorldInfo = async name => { loaded.push(name); return { entries: { disabled: { disable: true, content: 'DISABLED' }, active: { key: ['Катя'], content: name + ' '.repeat(5100) + 'IMPORTANT-TAIL' } } }; };
+    const text = await a.api.loreText(null); assert.deepEqual(loaded.sort(), ['Chat', 'Extra', 'Global', 'Persona', 'Primary']);
+    assert.ok(text.includes('IMPORTANT-TAIL')); assert.ok(text.includes('EMBEDDED')); assert.ok(!text.includes('DISABLED'));
+    const voice = await a.api.loreFor('Катя', null); assert.ok(voice.includes('Extra')); assert.ok(voice.includes('IMPORTANT-TAIL'));
+});
+test('explicit bilingual aliases with different phonetic keys unify feed and threads after reload', async () => {
+    const a = app(); a.answer(() => [{ name: 'Эшли Грэм', aliases: ['Ashley Graham'], role: 'student', bio: 'Студентка' }]); await a.api.extractLorePeople(a.s);
+    a.s.feed = [{ author: 'Ashley Graham', comments: [] }]; a.s.threads.push({ id: 'en', kind: 'dm', name: 'Ashley Graham', msgs: [] }, { id: 'ru', kind: 'dm', name: 'Эшли Грэм', msgs: [] });
+    a.api.S(); assert.equal(a.api.samePerson(a.s, 'Ashley Graham', 'Эшли Грэм'), true); assert.equal(a.s.feed[0].author, 'Эшли Грэм'); assert.equal(a.s.threads.length, 2);
+    a.context.chatMetadata.unihub = JSON.parse(JSON.stringify(a.s)); const restored = a.api.S(); assert.equal(a.api.personName(restored, 'Ashley Graham'), 'Эшли Грэм');
+});
+test('an ambiguous alias cannot merge different people', () => {
+    const a = app(); a.s.lorePeople = [{ name: 'Ashley Graham', aliases: ['Общее имя'] }, { name: 'Другой человек', aliases: ['Общее имя'] }]; a.s.feed.push({ author: 'Общее имя', comments: [] });
+    a.api.S(); assert.equal(a.api.samePerson(a.s, 'Ashley Graham', 'Другой человек'), false); assert.equal(a.s.feed[0].author, 'Общее имя');
+});
+test('a quoted breakup of other people cannot end the user relationship', async () => {
+    for (const source of ['story', 'dm', 'card']) {
+        const a = app(), text = 'Катя и Петя расстались.'; a.s.profile.relWithChar = true; a.th.pair = true;
+        if (source === 'story') a.add(text + ' Мы с Алексом по-прежнему вместе.');
+        if (source === 'dm') a.th.msgs.push({ text, me: false }); if (source === 'card') a.context.characters[0].description = text;
+        a.answer(() => ({ known: true, pair: false, pair_evidence: { source, text } })); await a.api.syncRel(a.s, a.th);
+        assert.equal(a.th.pair, true, source); assert.equal(a.s.profile.relWithChar, true, source);
+    }
+});
+test('third-party reported first-person breakup cannot clear an existing couple', async () => {
+    const a = app(); a.th.pair = true; a.add('Катя сказала: «Мы расстались.»');
+    a.answer(() => ({ pair: false, pair_evidence: { source: 'story', text: 'Мы расстались.' } })); await a.api.syncRel(a.s, a.th); assert.equal(a.th.pair, true);
+});
+test('failed or malformed grading preserves answer and allows a genuine later grade', async () => {
+    const a = app(), t = { id: 't', title: 'Работа', subject: 'История', desc: 'Задание', deadline: BASE + MIN };
+    a.s.tasks.push(t); a.elements['sh-ans'] = { value: 'Ответ студента, который должен проверить преподаватель.' };
+    for (const result of [null, {}, { grade: 4.5 }, { grade: '' }, { grade: 7 }]) {
+        a.answer(() => result); await a.api.ACT.submit({ id: 't' }, null, a.s); assert.ok(!t.done); assert.equal(a.s.grades.length, 0); assert.equal(t.answer, a.elements['sh-ans'].value);
+    }
+    assert.ok(a.api.taskView(a.s, 't').includes(t.answer)); a.answer(() => ({ grade: 5, comment: 'Верно' })); await a.api.ACT.submit({ id: 't' }, null, a.s);
+    assert.equal(t.done, true); assert.equal(t.grade, 5); assert.equal(a.s.grades.length, 1);
+});
+test('failed dean decision does not consume an excuse attempt', async () => {
+    const a = app(); a.s.schedule = [{ id: 'cl', day: 0, start: '10:00', end: '11:30', subject: 'История' }];
+    const key = a.api.occurrences(a.s, BASE, BASE + 1440 * MIN)[0].key; a.elements['sh-excuse'] = { value: 'Я заболела, у меня высокая температура.' };
+    a.answer(() => null); await a.api.ACT.excuse({ key }, null, a.s); assert.equal(a.s.excuses[key], undefined);
+    a.answer(() => ({ valid: true, reply: 'Принято.' })); await a.api.ACT.excuse({ key }, null, a.s); assert.equal(a.s.attendance[key], 'excused');
+});
+test('repeated like and follow toggles count each target only once per quest', () => {
+    const a = app(); a.s.feed.push({ id: 'p', author: 'Катя', likes: 0, comments: [] });
+    const like = a.api.makeQuest({ k: 'like', n: 3, title: 'Лайки' }, a.s), follow = a.api.makeQuest({ k: 'follow', n: 3, title: 'Подписки' }, a.s); a.s.social.quests = [like, follow];
+    for (let i = 0; i < 5; i++) { a.api.ACT.like({ id: 'p' }, null, a.s); a.api.ACT.follow({ name: 'Катя' }, null, a.s); }
+    assert.equal(like.p, 1); assert.equal(follow.p, 1); assert.ok(!like.done && !follow.done);
+    a.s.feed.push({ id: 'p2', comments: [] }, { id: 'p3', comments: [] });
+    a.api.questEvent(a.s, 'like', 1, '', '', { postId: 'p2' }); a.api.questEvent(a.s, 'like', 1, '', '', { postId: 'p3' }); assert.equal(like.done, true);
+});
+test('grocery waits for story delivery while parcels retain their separate timer', () => {
+    const a = app(); a.s.enforceFrom = a.s.quarter.start = BASE; a.s.orders = [
+        { id: 'g', kind: 'grocery', title: 'Молоко', eta: BASE, stage: 'cooking', dueReply: 2 }, { id: 'p', kind: 'parcel', title: 'Книга', to: 'Катя', eta: BASE },
+    ]; a.api.realTick(); assert.equal(a.s.orders[0].notified, undefined); assert.equal(a.s.orders[0].stage, 'cooking'); assert.equal(a.s.orders[1].notified, true);
+    a.s.orders[0].injected = true; a.api.onStoryReply(a.add('Курьер приехал.')); assert.equal(a.s.orders[0].stage, 'delivered');
+});
+test('generated schedules reject invalid times, reversed intervals and overlaps', async () => {
+    const a = app(); a.answer(() => [
+        { day: 0, start: '25:00', end: '26:30', subject: 'Invalid' }, { day: 0, start: '11:30', end: '10:30', subject: 'Reverse' },
+        { day: 0, start: '08:00', end: '09:30', subject: 'Too early' }, { day: 6, start: '10:00', end: '11:30', subject: 'Sunday' },
+        { day: 0, start: '10:00', end: '11:30', subject: 'Valid' }, { day: 0, start: '11:00', end: '12:30', subject: 'Overlap' },
+        ...[1, 2, 3].map(day => ({ day, start: '10:00', end: '11:30', subject: 'Valid' })),
+    ]); const list = await a.api.genSchedule(a.s, 'История'); assert.equal(list.length, 4); assert.ok(list.every(c => c.subject === 'Valid'));
+    a.answer(() => Array.from({ length: 4 }, () => ({ day: 0, start: '25:00', end: '26:30', subject: 'Invalid' })));
+    const fallback = await a.api.genSchedule(a.s, 'История'); assert.ok(fallback.length >= 4); assert.ok(fallback.every(c => c.start !== '25:00'));
+});
+test('ordinary HTML formatting preserves message text while service and reasoning blocks disappear', () => {
+    const a = app(); const result = a.api.cleanReply('<think>Reason</think><div>Привет.<br>Буду ждать.</div><horae>SECRET</horae><script>bad()</script>');
+    assert.equal(result, 'Привет.\nБуду ждать.'); assert.equal(a.api.cleanReply('<details><summary>Заголовок</summary>Текст</details>'), 'Заголовок\nТекст');
+});
+test('invalid numeric settings cannot produce NaN rating and injection depth zero is preserved', () => {
+    const a = app(); const limit = a.api.cfg().maxStrikes;
+    for (const value of ['0', '-1', 'Infinity', 'abc', '']) { const target = { dataset: { change: 'cfg', k: 'maxStrikes' }, value }; a.api.onChange({ target }); assert.equal(a.api.cfg().maxStrikes, limit); }
+    a.context.extensionSettings.unihub.maxStrikes = 0; assert.ok(Number.isFinite(a.api.rating(a.s)));
+    assert.equal(a.api.validSetting('quarterDays', 0), null); assert.equal(a.api.validSetting('lowGpa', 5.1), null); assert.equal(a.api.validSetting('injectDepth', 0), 0);
+});
+test('generated fractional prices cannot become free and invalid amounts cannot corrupt balance', async () => {
+    const a = app(); a.answer(() => [{ title: 'Кофе', price: 0.4 }, { title: 'Invalid', price: 'Infinity' }, { title: 'Negative', price: -4 }]);
+    await a.api.ACT.genMenu({}, null, a.s); assert.equal(a.s.menu.length, 1); assert.equal(a.s.menu[0].price, 1);
+    const before = a.s.wallet.balance; a.api.ACT.order({ id: a.s.menu[0].id }, null, a.s); assert.equal(a.s.wallet.balance, before - 1);
+    for (const n of [NaN, Infinity, -1, 0]) assert.equal(a.api.pay(a.s, n, 'Invalid'), false);
+    assert.equal(a.api.tx(a.s, Infinity, 'Invalid'), false); assert.equal(a.s.wallet.balance, before - 1);
+    assert.equal(a.api.placeFoodOrder(a.s, [{ item: { price: 20 }, qty: Infinity }]), false);
+});
+test('an invitation waits through sleep and then uses NPC biography and speech', async () => {
+    const a = messengerApp(), th = { id: 'npc', name: 'Катя', kind: 'dm', bio: 'UNIQUE-NPC-BIO', msgs: [], rel: 50 };
+    a.s.threads.push(th); a.s.lorePeople = [{ name: 'Катя', role: 'student', speech: 'UNIQUE-NPC-SPEECH' }];
+    a.api.applyPresence(a.s, th, { busy: true, sleeping: true, reason: 'спит', minutes: 480 }); meetingForm(a);
+    a.answer(prompt => { assert.ok(prompt.includes('UNIQUE-NPC-SPEECH')); assert.ok(prompt.includes('UNIQUE-NPC-BIO')); assert.ok(prompt.includes('Ответ на приглашение')); return { reply: 'Хорошо, встретимся.', accept: true, delta: 1 }; });
+    await a.api.ACT.proposeMeet({ id: th.id }, null, a.s); await a.api.drainQueue();
+    assert.equal(th.msgs.length, 1); assert.equal(a.calls.length, 0); assert.ok(th.pendingReply.waitForFree); assert.equal(a.s.meetings.length, 0);
+    a.api.applyPresence(a.s, th, { busy: false, sleeping: false }); a.setWall(th.pendingReply.at + MIN); a.api.tickMessenger(); await a.api.drainQueue();
+    assert.equal(th.msgs.filter(m => !m.me && !m.sys).length, 1); assert.equal(a.s.meetings.length, 1);
+});
+test('busy invitation can check in briefly but uses the shared availability prompt', async () => {
+    const a = messengerApp(0.8); meetingForm(a); a.api.applyPresence(a.s, a.th, { busy: true, reason: 'работает', minutes: 60 });
+    a.answer(prompt => { assert.ok(prompt.includes('ненадолго заглянул в мессенджер')); return { reply: 'Отвечу после работы.', accept: false, delta: 0 }; });
+    await a.api.ACT.proposeMeet({ id: a.th.id }, null, a.s); assert.equal(a.calls.length, 0); const at = a.th.pendingReply.at;
+    a.setWall(at + MIN); a.api.tickMessenger(); await a.api.drainQueue(); assert.equal(a.calls.length, 1); assert.equal(a.api.presenceFor(a.s, a.th.name).busy, true); assert.equal(a.s.meetings.length, 0);
+});
+test('invitation timestamps are shifted to story time once even when device date differs', async () => {
+    const a = messengerApp(); a.setWall(new Date(2026, 9, 3, 15).getTime()); meetingForm(a);
+    a.answer(() => ({ reply: 'Хорошо.', accept: true, delta: 1 })); await a.api.ACT.proposeMeet({ id: a.th.id }, null, a.s); await a.api.drainQueue();
+    assert.equal(a.th.msgs.filter(m => !m.me && !m.sys).length, 1);
+    for (const m of a.th.msgs) { assert.equal(m.t, a.wall()); assert.equal(m.gt, BASE); }
+});
+test('a delayed invitation cannot create a meeting in the past', async () => {
+    const a = messengerApp(), d = defer(); meetingForm(a); a.answer(() => d.promise);
+    await a.api.ACT.proposeMeet({ id: a.th.id }, null, a.s); await started(a);
+    a.s.clock.t += 3 * 1440 * MIN; d.resolve({ reply: 'Давай.', accept: true }); await a.api.drainQueue(); assert.equal(a.s.meetings.length, 0);
+});
+test('invalid invitation time is rejected before sending any message', async () => {
+    const a = messengerApp(); meetingForm(a); a.elements['sh-m-time'].value = '25:00'; await a.api.ACT.proposeMeet({ id: a.th.id }, null, a.s);
+    assert.equal(a.th.msgs.length, 0); assert.equal(a.s.meetings.length, 0); assert.equal(a.calls.length, 0);
+});
+test('checkbox, custom ability selector and caret survive a background form render', () => {
+    const a = app(); a.s.profile.abilities = 'Собственная сила'; a.s.profile.abilityVisible = false;
+    let cb, sel, text; const custom = { id: 'sh-pf-abil-o', style: {} };
+    function inputs() {
+        cb = { id: 'sh-pf-abil-v', type: 'checkbox', value: 'on', checked: false };
+        sel = { id: 'sh-pf-abil', value: '', dataset: { change: 'idSel', other: custom.id } };
+        text = { id: 'sh-pf-abil-c', type: 'text', value: '', selectionStart: 0, selectionEnd: 0, setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }, focus() {} };
+        for (const el of [cb, sel, text, custom]) a.elements[el.id] = el; custom.style.display = 'none';
+    }
+    inputs(); const scr = { querySelectorAll: selector => selector.includes('data-change') ? [sel] : [cb, sel, text], contains: el => [cb, sel, text, custom].includes(el), scrollTop: 12, scrollHeight: 100 };
+    Object.defineProperty(scr, 'innerHTML', { set() { inputs(); } }); a.elements['unihub-phone'] = { querySelector: selector => selector === '.sh-screen' ? scr : { innerHTML: '' } };
+    a.api.ui.open = true; a.api.ui.view = 'profile'; a.api.realRender(); cb.checked = true; sel.value = '__other'; text.value = 'Своя способность'; text.selectionStart = text.selectionEnd = 4;
+    a.api.realRender(); assert.equal(cb.checked, true); assert.equal(sel.value, '__other'); assert.equal(custom.style.display, ''); assert.equal(text.value, 'Своя способность'); assert.equal(text.selectionStart, 4);
+});
+test('silent native save failure still leaves the newest local revision recoverable', async () => {
+    const storage = memoryStorage(), a = app({ storage }); a.context.saveMetadata = async () => undefined;
+    a.s.wallet.balance = 789; a.api.save(a.s); await [...a.timers.values()].find(t => t.ms === 400).fn(); assert.equal(app({ storage }).s.wallet.balance, 789);
+    const b = app({ storage }); b.context.chatMetadata.unihub = { ...b.s, wallet: { ...b.s.wallet, balance: 900 }, saveRevision: b.s.saveRevision + 1 };
+    assert.equal(b.api.S().wallet.balance, 900);
+});
+test('legacy invalid timetable does not roll attendance into the next day', () => {
+    const a = app(); a.s.schedule = [{ id: 'cl', day: 0, start: '25:00', end: '26:30', subject: 'История' }];
+    assert.equal(a.api.occurrences(a.s, BASE, BASE + 3 * 1440 * MIN).length, 0);
+});
+test('zero injection depth reaches SillyTavern as zero', () => {
+    const a = app(); let depth; a.api.cfg().injectDepth = 0; a.context.setExtensionPrompt = (name, text, position, value) => { if (name === 'unihub') depth = value; };
+    a.api.updateInjection(); assert.equal(depth, 0);
+});
+test('all extension screens render with populated state after the fixes', () => {
+    const a = app(); a.s.world = 'mundane';
+    a.s.feed.push({ id: 'p', author: 'Катя', text: 'Пост', comments: [{ id: 'c', author: 'Катя', text: 'Комментарий', t: a.wall() }] });
+    a.s.tasks.push({ id: 't', title: 'ДЗ', subject: 'История', desc: 'Опишите события', issued: BASE, deadline: BASE + MIN });
+    const cases = [...['feed', 'chats', 'dating', 'study', 'more'].map(tab => ({ tab, view: null })),
+        ...['post', 'person', 'me', 'thread', 'meet', 'task', 'excuse', 'meetings', 'clock', 'delivery', 'market', 'wallet', 'campus', 'profile', 'settings', 'log'].map(view => ({ view, param: ({ post: 'p', person: 'Катя', thread: 'char', meet: 'char', task: 't' })[view] || null }))];
+    for (const state of cases) { Object.assign(a.api.ui, state); assert.equal(typeof a.api.screenHTML(), 'string'); }
+    for (const studyTab of ['schedule', 'tasks', 'grades', 'rating', 'help']) { Object.assign(a.api.ui, { tab: 'study', view: null, studyTab }); assert.equal(typeof a.api.screenHTML(), 'string'); }
 });

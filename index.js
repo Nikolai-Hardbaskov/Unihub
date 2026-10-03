@@ -52,11 +52,23 @@
         deadlineOffsetMin: 5,   // дедлайн — за N минут до следующей пары
         extraTaskHours: 24,
     };
+    const CFG_RANGES = {
+        injectDepth: [0, 100], proactiveMin: [2, 60], stepMin: [0, 120], chatContext: [0, 100],
+        quarterDays: [1, 365], maxStrikes: [1, 100], lowGpa: [2, 5], lowGpaDays: [1, 365],
+        startBalance: [0, 100000000], stipend: [0, 100000000], stipendMinGpa: [2, 5],
+        checkInEarlyMin: [0, 120], deadlineOffsetMin: [0, 1440], extraTaskHours: [1, 720],
+    };
+    function validSetting(k, value) {
+        const range = CFG_RANGES[k], n = Number(value);
+        if (!range || value === '' || value === null || !Number.isFinite(n) || n < range[0] || n > range[1]) return null;
+        return k === 'lowGpa' || k === 'stipendMinGpa' ? n : Math.round(n);
+    }
 
     function cfg() {
         const es = ctx().extensionSettings;
         if (!es[MODULE]) es[MODULE] = es[OLD_MODULE] ? { ...es[OLD_MODULE] } : {};
         for (const [k, v] of Object.entries(DEFAULTS)) if (es[MODULE][k] === undefined) es[MODULE][k] = v;
+        for (const k of Object.keys(CFG_RANGES)) es[MODULE][k] = validSetting(k, es[MODULE][k]) ?? DEFAULTS[k];
         return es[MODULE];
     }
     const saveCfg = () => ctx().saveSettingsDebounced?.();
@@ -74,7 +86,15 @@
     const fmtDay = (ts) => new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
     const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
     const pad = (t) => String(t).trim().padStart(5, '0');
-    const TIME_RE = /^\d{1,2}:\d{2}$/;
+    function clockMinutes(value) {
+        const m = /^(\d{1,2}):(\d{2})$/.exec(String(value).trim());
+        return m && +m[1] <= 23 && +m[2] <= 59 ? +m[1] * 60 + +m[2] : null;
+    }
+    function priceOf(value, optional = false) {
+        const n = Number(value);
+        if (optional && (value === undefined || value === null || value === '' || n === 0)) return 0;
+        return Number.isFinite(n) && n > 0 && n <= 100000000 ? Math.max(1, Math.round(n)) : null;
+    }
     const dkey = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
     function byId(id) {
         const root = document.getElementById('unihub-phone');
@@ -351,9 +371,25 @@
         for (const p of stored) for (const name of [p.name, ...(p.aliases || [])]) add(name);
         for (const [o, k] of records) add(o[k]);
         for (const name of s.social.following) add(name);
-        // Только подтверждённые варианты из источников с тем же полным ключом.
-        for (const p of s.lorePeople || []) for (const alias of p.aliases || []) if (personKey(alias) === personKey(p.name)) add(alias);
+        const aliasTargets = new Map();
+        for (const p of [...stored, ...(s.lorePeople || [])]) for (const alias of p.aliases || []) {
+            add(alias);
+            const a = personKey(alias), target = personKey(p.name);
+            if (!a || !target || a === target) continue;
+            if (!aliasTargets.has(a)) aliasTargets.set(a, new Set());
+            aliasTargets.get(a).add(target);
+        }
         add(s.profile.name, true); if (!ctx().groupId) add(ctx().name2, true);
+        // Явно указанные альтернативные имена могут иметь другую транслитерацию.
+        // Не объединяем общий псевдоним, принадлежащий нескольким людям.
+        for (const [alias, targets] of aliasTargets) {
+            if (targets.size !== 1) continue;
+            const target = [...targets][0], source = groups.get(alias), dest = groups.get(target);
+            if (!source || !dest || source === dest || source.preferred === s.profile.name || dest.preferred === s.profile.name) continue;
+            for (const n of source.names) dest.names.add(n);
+            dest.preferred ||= source.preferred;
+            groups.delete(alias);
+        }
         const fullByFirst = new Map();
         for (const key of groups.keys()) if (key.includes(' ')) { const first = key.split(' ')[0]; if (!fullByFirst.has(first)) fullByFirst.set(first, []); fullByFirst.get(first).push(key); }
         for (const [first, keys] of fullByFirst) if (keys.length === 1 && groups.has(first) && groups.get(first).preferred !== s.profile.name) {
@@ -427,6 +463,17 @@
     }
 
     const migrated = new WeakSet();
+    const pendingSaves = new Map(), saveJobs = new Map(), saveBackups = new Map();
+    const chatScope = (c = ctx()) => JSON.stringify([c.groupId || '', c.groupId ? '' : c.characters?.[c.characterId]?.avatar || c.characterId, c.chatId || c.getCurrentChatId?.()]);
+    function saveStorage() { try { return ctx().accountStorage || window.localStorage; } catch { return null; } }
+    function journal(key, value) {
+        const storage = saveStorage(), name = `unihub.pending:${key}`;
+        try {
+            if (value === undefined) return JSON.parse(storage?.getItem(name) || 'null');
+            if (value === null) storage?.removeItem(name); else storage?.setItem(name, JSON.stringify(value));
+        } catch (e) { logErr('Резервное сохранение', e); }
+        return null;
+    }
     function hasChat() {
         const c = ctx();
         const who = (c.characterId !== undefined && c.characterId !== null) || c.groupId;
@@ -436,6 +483,12 @@
     function S() {
         if (!hasChat()) return null;
         const md = ctx().chatMetadata;
+        const key = chatScope(), pending = pendingSaves.get(key) || saveBackups.get(key) || journal(key);
+        if (pending) saveBackups.set(key, pending);
+        if (pending?.state && pending.revision > (md[MODULE]?.saveRevision || 0)) {
+            md[MODULE] = pending.state;
+            pendingSaves.set(key, pending);
+        }
         if (!md[MODULE] && md[OLD_MODULE]) { md[MODULE] = md[OLD_MODULE]; delete md[OLD_MODULE]; }
         if (!md[MODULE]) md[MODULE] = freshState();
         const s = md[MODULE];
@@ -446,16 +499,37 @@
             migrated.add(s);
         }
         normaliseIdentities(s);
+        if (s.auth && gameMode(s) && !s.studyClockVersion && s.clock.storyInitialized && s.enforceFrom > s.clock.t && s.clock.source !== 'вручную'
+            && !s.grades.length && !s.strikes.length && !Object.keys(s.attendance).length) alignStudyClock(s, s.clock.t);
+        if (!s.studyClockVersion && s.clock.storyInitialized) s.studyClockVersion = 1;
         return s;
     }
 
-    let saveTimer = null;
     function save(s) {
-        if (s && S() !== s) return;
+        s ||= S();
+        if (!s || S() !== s) return;
         stampGame(s);
+        const key = chatScope(), revision = s.saveRevision = Math.max(Date.now(), (s.saveRevision || 0) + 1);
+        const record = { revision, state: s };
+        pendingSaves.set(key, record);
+        saveBackups.set(key, record);
+        journal(key, record);
         scheduleStorySync();
-        clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => { try { ctx().saveMetadata?.(); } catch (e) { logErr('[UniHub] save', e); } }, 400);
+        clearTimeout(saveJobs.get(key));
+        saveJobs.set(key, setTimeout(async () => {
+            saveJobs.delete(key);
+            if (chatScope() !== key || S() !== s) return;
+            try {
+                const saver = ctx().saveMetadata;
+                if (typeof saver !== 'function') return;
+                await saver();
+                if (chatScope() === key && S() === s && s.saveRevision === revision && pendingSaves.get(key) === record) {
+                    // ST может поглотить сетевую ошибку. Последняя копия остаётся до следующей записи;
+                    // при загрузке она применяется только если серверная ревизия старее.
+                    pendingSaves.delete(key);
+                }
+            } catch (e) { logErr('[UniHub] save', e); }
+        }, 400));
     }
 
     // куда ведёт уведомление, если место не указано явно — по смыслу текста
@@ -479,12 +553,17 @@
         if (type !== 'social') toast({ warn: 'warning', bad: 'error', important: 'info', info: 'success' }[type] || 'info', text);
     }
     function tx(s, amount, label) {
+        if (!Number.isFinite(amount) || !Number.isFinite(s.wallet.balance + amount)) return false;
         s.wallet.balance = Math.round((s.wallet.balance + amount) * 100) / 100;
         s.wallet.history.unshift({ amount, label, t: Date.now() });
         if (s.wallet.history.length > 200) s.wallet.history.length = 200;
+        return true;
     }
     /** Списание с проверкой баланса. Нельзя купить дороже, чем есть на счёте. */
     function pay(s, amount, label) {
+        if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(s.wallet.balance)) {
+            toast('error', 'Некорректная сумма. Обновите цену и повторите действие.'); return false;
+        }
         if (s.wallet.balance < amount) {
             toast('error', `Недостаточно средств: нужно ${money(amount)}, на счёте ${money(s.wallet.balance)}.`);
             return false;
@@ -501,6 +580,8 @@
     const inPause = (s, t) => s.pauses.some(([a, b]) => t >= a && t <= b) || (s.pausedAt && t >= s.pausedAt);
 
     function inst(cl, day) {
+        const start = clockMinutes(cl.start), end = clockMinutes(cl.end);
+        if (start === null || end === null || end <= start) return { start: NaN, end: NaN };
         const [sh, sm] = cl.start.split(':').map(Number);
         const [eh, em] = cl.end.split(':').map(Number);
         const a = new Date(day); a.setHours(sh, sm, 0, 0);
@@ -527,7 +608,8 @@
         return { cur: occ.find((o) => o.start <= now && o.end > now), next: occ.find((o) => o.start > now) };
     }
     function findOcc(s, key) {
-        const [, date] = key.split('@');
+        const [, date] = String(key || '').split('@');
+        if (!/^\d{4}-\d{1,2}-\d{1,2}$/.test(date || '')) return null;
         const [y, m, d] = date.split('-').map(Number);
         const day = new Date(y, m - 1, d).getTime();
         return occurrences(s, day, day + DAY - 1).find((o) => o.key === key);
@@ -539,38 +621,55 @@
 
     // новые версии ST принимают объект параметров, старые — позиционные аргументы
     const objStyle = (fn) => fn.length === 0 || /^[^(]*\(\s*\{/.test(Function.prototype.toString.call(fn));
-    let uniHubGenerating = 0;
-    let uniHubQuietGenerating = 0;
+    const generationStates = new WeakMap();
+    function generationState(c = ctx()) {
+        const key = c.chatMetadata?.[MODULE] || c.chatMetadata;
+        if (!key || typeof key !== 'object') return { raw: 0, quiet: 0 };
+        if (!generationStates.has(key)) generationStates.set(key, { raw: 0, quiet: 0 });
+        return generationStates.get(key);
+    }
+    const uniHubGenerating = () => generationState().raw;
+    const uniHubQuietGenerating = () => generationState().quiet;
+    const AI_TIMEOUT = 180000;
+    async function boundedRequest(fn) {
+        let timer;
+        try {
+            return await Promise.race([fn(), new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error('Истекло время ожидания ответа ИИ. Повторите запрос.')), AI_TIMEOUT);
+            })]);
+        } finally { clearTimeout(timer); }
+    }
     async function aiRaw(prompt) {
-        const c = ctx();
-        uniHubGenerating++;
+        const c = ctx(), generating = generationState(c);
+        generating.raw++;
         try {
             if (typeof c.generateRaw === 'function') {
-                if (objStyle(c.generateRaw)) return await c.generateRaw({ prompt, systemPrompt: SYS });
-                return await c.generateRaw(prompt, null, false, false, SYS);
+                if (objStyle(c.generateRaw)) return await boundedRequest(() => c.generateRaw({ prompt, systemPrompt: SYS }));
+                return await boundedRequest(() => c.generateRaw(prompt, null, false, false, SYS));
             }
             if (typeof c.generateQuietPrompt === 'function') {
                 const q = `${SYS}\n\n${prompt}`;
-                uniHubQuietGenerating++;
+                generating.quiet++;
                 try {
-                    if (objStyle(c.generateQuietPrompt)) return await c.generateQuietPrompt({ quietPrompt: q });
-                    return await c.generateQuietPrompt(q, false, true);
-                } finally { uniHubQuietGenerating--; }
+                    if (objStyle(c.generateQuietPrompt)) return await boundedRequest(() => c.generateQuietPrompt({ quietPrompt: q, skipWIAN: true }));
+                    return await boundedRequest(() => c.generateQuietPrompt(q, false, true));
+                } finally { generating.quiet--; }
             }
         } catch (e) { logErr('[UniHub] AI error', e); }
         finally {
-            uniHubGenerating--;
+            generating.raw--;
             const s = S();
-            if (!uniHubGenerating && s?.auth && storySyncStates.get(s)?.pending) setTimeout(() => flushStorySync(s), 0);
+            if (!uniHubGenerating() && s?.auth && storySyncStates.get(s)?.pending) setTimeout(() => flushStorySync(s), 0);
         }
         return '';
     }
     /** Убирает размышления модели и служебные блоки других расширений (Horae и т.п.). */
-    const STRIP_TAGS = 'horae\\w*|status\\w*|state\\w*|stats|info|details|summary|meta|tracker\\w*|scene\\w*|time|location|memory|event\\w*|plot\\w*|update\\w*|note\\w*';
+    const STRIP_TAGS = 'horae\\w*|status\\w*|state\\w*|stats|meta|tracker\\w*|scene\\w*|memory|event\\w*|plot\\w*|update\\w*|note\\w*|script|style';
     const stripThink = (t) => String(t || '')
         .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
         .replace(new RegExp(`<(${STRIP_TAGS})\\b[^>]*>[\\s\\S]*?(<\\/\\1\\s*>|$)`, 'gi'), '')
-        .replace(/<([a-z][\w-]{2,})\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+        .replace(/<br\s*\/?\s*>/gi, '\n')
+        .replace(/<\/(?:div|p|li|section|article|summary|details)>/gi, '\n')
         .replace(/<\/?[a-z][\w-]*\b[^>]*>/gi, '')
         .replace(/\n{3,}/g, '\n\n');
     /** Для текста сообщений: ещё и «шапки», которые модель иногда дописывает. */
@@ -659,27 +758,41 @@
         }
         return '';
     }
-    /** Записи лорбука, чьи ключи встречаются в тексте, плюс постоянные записи. */
-    async function loreFor(text, maxChars = 3000) {
+    let worldInfoModulePromise;
+    async function loreEntries() {
         const c = ctx();
         const ch = c.characters?.[c.characterId];
         const books = new Set();
         if (ch?.data?.extensions?.world) books.add(ch.data.extensions.world);
         if (c.chatMetadata?.world_info) books.add(c.chatMetadata.world_info);
-        const low = String(text).toLowerCase();
-        const out = [];
-        const take = (keys, content, constant, disabled) => {
-            if (disabled || !content) return;
-            const hit = constant || (keys || []).some((k) => { k = String(k).trim().toLowerCase(); return k.length > 1 && low.includes(k); });
-            if (hit) out.push(macros(content));
-        };
+        if (c.powerUserSettings?.persona_description_lorebook) books.add(c.powerUserSettings.persona_description_lorebook);
+        if (!worldInfoModulePromise && document.baseURI) {
+            worldInfoModulePromise = import(new URL('scripts/world-info.js', document.baseURI).href)
+                .catch(e => { logErr('Настройки лорбуков', e); return null; });
+        }
+        const wi = await worldInfoModulePromise;
+        for (const name of wi?.selected_world_info || []) books.add(name);
+        const file = String(ch?.avatar || '').replace(/\.[^.]+$/, '');
+        const extras = wi?.world_info?.charLore?.find(e => e.name === file)?.extraBooks || [];
+        for (const name of extras) books.add(name);
+        const entries = [];
         for (const name of books) {
             try {
                 const data = await c.loadWorldInfo?.(name);
-                for (const e of Object.values(data?.entries || {})) take(e.key, e.content, e.constant, e.disable);
+                for (const e of Object.values(data?.entries || {})) if (e && !e.disable && e.content) entries.push({ keys: Array.isArray(e.key) ? e.key : [], content: macros(e.content), constant: e.constant });
             } catch (e) { logErr('Лорбук', e); }
         }
-        for (const e of ch?.data?.character_book?.entries || []) take(e.keys, e.content, e.constant, e.enabled === false);
+        for (const e of ch?.data?.character_book?.entries || []) if (e && e.enabled !== false && e.content) entries.push({ keys: Array.isArray(e.keys) ? e.keys : [], content: macros(e.content), constant: e.constant });
+        return [...new Map(entries.map(e => [JSON.stringify([e.keys,e.content]),e])).values()];
+    }
+    /** Записи подключённых лорбуков, чьи ключи встречаются в тексте, плюс постоянные записи. */
+    async function loreFor(text, maxChars = 3000) {
+        const low = String(text).toLowerCase();
+        const out = [];
+        for (const e of await loreEntries()) {
+            const hit = e.constant || e.keys.some(k => { k = String(k).trim().toLowerCase(); return k.length > 1 && low.includes(k); });
+            if (hit) out.push(e.content);
+        }
         const result = out.join('\n---\n');
         return maxChars === null ? result : result.slice(0, maxChars);
     }
@@ -724,34 +837,26 @@
         return `Мир: университет, где учатся люди, полулюди и сверхъестественные виды.\n${character}\n${genderRule(p)}\nСтудент-пользователь: ${p.name}; пол: ${GENDERS[p.gender] || 'не указан'}; вид: ${p.species || 'не указан'}; способности: ${abilityInfo(p)}; факультет: ${p.faculty || 'не выбран'}; курс: ${p.year}.\n${reactionGuide(s)}`;
     }
     async function loreText(filterRe) {
-        const c = ctx();
-        const ch = c.characters?.[c.characterId];
-        const books = new Set();
-        if (ch?.data?.extensions?.world) books.add(ch.data.extensions.world);
-        if (c.chatMetadata?.world_info) books.add(c.chatMetadata.world_info);
         const out = [];
-        const take = (keys, content) => {
-            const t = `${(keys || []).join(', ')}: ${content || ''}`;
+        for (const e of await loreEntries()) {
+            const t = `${e.keys.join(', ')}: ${e.content}`;
+            if (filterRe) filterRe.lastIndex = 0;
             if (!filterRe || filterRe.test(t)) out.push(t);
-        };
-        for (const name of books) {
-            try {
-                const data = await c.loadWorldInfo?.(name);
-                for (const e of Object.values(data?.entries || {})) take(e.key, e.content);
-            } catch (e) { logErr('[UniHub] lorebook', e); }
         }
-        for (const e of ch?.data?.character_book?.entries || []) take(e.keys, e.content);
-        return out.join('\n').slice(0, 5000);
+        return out.join('\n');
     }
 
     // последовательная очередь фоновых запросов к ИИ
     let queue = Promise.resolve();
+    const chatQueues = new WeakMap();
     function enqueue(s, fn) {
-        queue = queue.then(async () => {
+        const previous = chatQueues.get(s) || Promise.resolve();
+        queue = previous.then(async () => {
             if (S() !== s) return;
             await fn();
             if (S() === s) { save(s); render(); }
         }).catch((e) => logErr('[UniHub]', e));
+        chatQueues.set(s, queue);
         return queue;
     }
 
@@ -759,7 +864,9 @@
 
     async function loadFaculties(s) {
         const lore = await loreText(/факульт|faculty|кафедр|университет|академи|колледж|институт|school|college|department|major/i);
+        if (S() !== s) return;
         const r = await aiJSON(`${world(s)}\n\nЛор (лорбук и карточка):\n${lore || '(нет данных)'}\n\nЗадача: определи список факультетов университета. Если факультеты упомянуты в лоре или описании персонажа — используй ИМЕННО их и пометь source "lore". Если информации нет — придумай 8–10 разнообразных факультетов, подходящих этому миру (гуманитарные, естественные, творческие, прикладные), source "invented". Если в лоре факультетов меньше 4 — дополни их придуманными.\nФормат: [{"name":"...","desc":"одно предложение","source":"lore"}]`);
+        if (S() !== s) return [];
         const list = Array.isArray(r) ? r.filter((f) => f && f.name).map((f) => ({ name: String(f.name).slice(0, 80), desc: String(f.desc || '').slice(0, 160), source: f.source === 'lore' ? 'lore' : 'invented' })) : [];
         return list.length ? list : (mundane(s) ? MUNDANE_FACULTIES : FALLBACK_FACULTIES);
     }
@@ -779,9 +886,17 @@
     }
     async function genSchedule(s, fac) {
         const lore = await loreText(new RegExp(escRe(fac.slice(0, 30)), 'i'));
+        if (S() !== s) return;
         const r = await aiJSON(`${world(s)}\n${lore ? `Лор о факультете:\n${lore}\n` : ''}\nСоставь недельное расписание пар для студента ${s.profile.year}-го курса факультета «${fac}». Дни Пн–Сб (day: 0 = понедельник … 5 = суббота), 2–4 пары в день, время между 08:30 и 19:00, пара 60–95 минут, без пересечений. 6–9 разных профильных предметов, подходящих миру; предметы повторяются в течение недели.\nФормат: [{"day":0,"start":"09:00","end":"10:30","subject":"...","teacher":"...","room":"..."}]`);
-        const ok = (Array.isArray(r) ? r : []).filter((c) => c && Number.isInteger(+c.day) && +c.day >= 0 && +c.day <= 6
-            && TIME_RE.test(String(c.start).trim()) && TIME_RE.test(String(c.end).trim()) && c.subject && pad(c.end) > pad(c.start));
+        if (S() !== s) return [];
+        const ok = [];
+        for (const c of Array.isArray(r) ? r : []) {
+            if (!c || !Number.isInteger(+c.day) || +c.day < 0 || +c.day > 5 || !c.subject) continue;
+            const start = clockMinutes(c.start), end = clockMinutes(c.end);
+            if (start === null || end === null || start < 8 * 60 + 30 || end > 19 * 60 || end - start < 60 || end - start > 95) continue;
+            if (ok.some(o => +o.day === +c.day && clockMinutes(o.start) < end && clockMinutes(o.end) > start)) continue;
+            ok.push(c);
+        }
         const list = ok.length >= 4 ? ok : fallbackSchedule(fac);
         return list.map((c) => ({
             id: uid(), day: +c.day, start: pad(c.start), end: pad(c.end),
@@ -792,6 +907,7 @@
     function genTaskDesc(s, t) {
         enqueue(s, async () => {
             const r = await aiJSON(`${world(s)}\n\nПридумай ${t.extra ? 'ДОПОЛНИТЕЛЬНОЕ задание (для исправления нарушений, чуть сложнее обычного)' : 'домашнее задание'} по предмету «${t.subject}». Выполняется письменным ответом на 3–10 предложений: эссе, решение задачи, разбор ситуации, описание ритуала или эксперимента.\nФормат: {"title":"короткое название","desc":"формулировка задания, 2–4 предложения"}`);
+            if (S() !== s) return;
             t.title = (r?.title ? `${t.extra ? 'Доп.: ' : ''}${String(r.title).slice(0, 80)}` : t.title);
             t.desc = r?.desc ? String(r.desc).slice(0, 800) : `Письменно ответьте: какие три главные идеи последнего занятия по предмету «${t.subject}» вы усвоили и как примените их на практике?`;
         });
@@ -869,11 +985,11 @@ task — если назначена письменная отработка; ap
         let ch = false;
 
         for (const o of s.orders) {
-            if (o.notified || o.kind === 'food' || gnow < o.eta) continue;
+            if (o.notified || o.kind !== 'parcel' || gnow < o.eta) continue;
             o.notified = true; ch = true;
             notify(s, `📦 Посылка для ${o.to} доставлена.`);
         }
-        for (const l of s.listings) if (!l.sold && Math.random() < 1 / 240) {
+        for (const l of s.listings) if (!l.sold && Number.isFinite(l.price) && l.price > 0 && Math.random() < 1 / 240) {
             l.sold = true; ch = true;
             tx(s, Math.round(l.price * 0.95), `Продажа: ${l.title} (комиссия 5%)`);
             notify(s, `💰 Продано: ${l.title}.`);
@@ -1148,6 +1264,13 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         armHooks(s, k, detail, event);
         for (const q of soc(s).quests) {
             if (q.k !== k || q.done || (q.param && q.param !== param) || !questMatchesPost(s, q, k, event)) continue;
+            const action = k === 'like' && event?.postId ? `post:${event.postId}`
+                : k === 'follow' && event?.person ? `person:${personKey(personName(s, event.person))}` : '';
+            if (action) {
+                q.seenActions ||= [];
+                if (q.seenActions.includes(action)) continue;
+                q.seenActions.push(action);
+            }
             q.p = Math.min(q.n, q.p + amt);
             if (q.p >= q.n) completeQuest(s, q);
         }
@@ -1255,11 +1378,34 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
             ? ['description','personality','scenario'].map(k => field(ch,k) ? `${k}: ${macros(field(ch,k))}` : '').filter(Boolean).join('\n')
             : `${th.bio || ''}${lp ? `\nИз лора: ${lp.bio || ''}${lp.relation ? `; для ${c.name2}: ${lp.relation}` : ''}` : ''}`;
         const messages = (ctx().chat || []).filter(m => m && !m.is_system && m.mes).slice(-20);
-        return { card, story: messages.map(m => `${m.name}: ${m.mes}`).join('\n'),
+        return { card, storyMessages: messages, story: messages.map(m => `${m.name}: ${m.mes}`).join('\n'),
             dm: th.msgs.filter(m => !m.sys).slice(-10).map(m => `${m.me ? s.profile.name : th.name}: ${m.text}`).join('\n') };
     }
     const relationshipText = value => String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    function relationshipEvidence(evidence, sources, pair) {
+    function relationshipActors(s, th, evidence, sources, quote, marker) {
+        const c = ctx();
+        const names = name => [...new Set([name, ...(s.peopleIdentities || []).filter(p => samePerson(s, p.name, name)).flatMap(p => p.aliases || [])])].filter(Boolean);
+        const users = [...names(s.profile.name), c.name1], partners = [...names(th.name), ...(th.kind === 'char' ? [c.name2] : [])];
+        const mentions = (text, list) => list.filter(Boolean).some(name => {
+            const variants = [name, name.split(/\s+/)[0]].filter(n => n.length >= 3);
+            return variants.some(n => new RegExp(`(^|[^\\p{L}])${escRe(n)}(?=$|[^\\p{L}])`, 'iu').test(text));
+        });
+        const direct = /(?:\bwe\b|\bour\s+relationship\b|\byou\s+and\s+I\b|(?:^|[^а-яё])(?:мы|наш[иа]\s+отношени|я\s+и\s+ты|ты\s+и\s+я)(?=$|[^а-яё]))/i;
+        const clauses = quote.split(/[.!?]\s+|\n+/).filter(text => marker.test(text));
+        return clauses.some(text => {
+            if (mentions(text, users) && mentions(text, partners)) return true;
+            if (evidence.source === 'card') return mentions(text, users) && /\b(?:his|her|my|your)\b|(?:^|[^а-яё])(?:его|её|ее|моя|мой|твоя|твой)(?=$|[^а-яё])/i.test(text);
+            if (!direct.test(text)) return false;
+            const messages = evidence.source === 'dm' ? th.msgs.filter(m => !m.sys).map(m => ({ ...m, mes: m.text, is_user: m.me, name: m.from || th.name })) : sources.storyMessages || [];
+            return messages.some(m => {
+                const full = relationshipText(m.mes);
+                if (!full.includes(quote) || (!m.is_user && !samePerson(s, m.name, th.name))) return false;
+                const before = full.slice(Math.max(0, full.indexOf(quote) - 150), full.indexOf(quote));
+                return !/(?:сказал[аи]?|рассказал[аи]?|цитир\w*|said|told|quote)\s*[^.!?]*[«"“:]\s*$/i.test(before);
+            });
+        });
+    }
+    function relationshipEvidence(evidence, sources, pair, s, th) {
         if (!evidence || !['card','story','dm'].includes(evidence.source)) return '';
         const quote = relationshipText(evidence.text);
         if (quote.length < 8 || !relationshipText(sources[evidence.source]).includes(quote)) return '';
@@ -1268,10 +1414,11 @@ ${scene ? `Текущий момент истории: ${scene}\n` : ''}${story 
         if (!pair && /(?:не\s+(?:расста|разош|развел|законч|прекрат|разорв)|(?:did\s+not|didn't|never|haven't|not|won't|might|could|may|if).{0,20}(?:break\s+up|broke\s+up|broken\s+up|divorc)|если.{0,30}(?:расста|развод))/i.test(quote)) return '';
         if (pair && /(?:hopes?|wants?|wishes?|pretends?|if|would\s+like).{0,50}(?:girlfriend|boyfriend|dating|relationship)|(?:хочет|мечтает|если).{0,50}(?:девушк|парень|отношени|встреча)/i.test(quote)) return '';
         const together = /girlfriend|boyfriend|partner|wife|husband|dating|relationship|married|пара|девушк|парень|парня|встреча(?:ются|емся|ется|юсь)|отношени|жен[аы]|муж|супруг/i;
-        return (pair ? together.test(quote) && !ended.test(quote) : ended.test(quote)) ? quote : '';
+        if (!(pair ? together.test(quote) && !ended.test(quote) : ended.test(quote))) return '';
+        return relationshipActors(s, th, evidence, sources, quote, pair ? together : ended) ? quote : '';
     }
     function relationSyncKey(th) {
-        return String(hash(JSON.stringify(['relationships-v2', storySyncKey(), relationshipSources(S(),th).card, charCard(), th.bio, lorePerson(S(), th.name),
+        return String(hash(JSON.stringify(['relationships-v3', storySyncKey(), relationshipSources(S(),th).card, charCard(), th.bio, lorePerson(S(), th.name),
             th.msgs.filter((m) => !m.sys).slice(-10).map((m) => [m.me, m.text])])));
     }
     /** Определяет текущие отношения по карточке, основной истории и переписке (история важнее карточки). */
@@ -1306,24 +1453,25 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             if (th.relCardBaseline?.key !== cardKey) th.relCardBaseline = { key: cardKey };
             if (cardQuote.length >= 8 && relationshipText(sources.card).includes(cardQuote)) {
                 if (r.card_known === true) th.relCardBaseline.known = true;
-                if (r.card_pair === true && relationshipEvidence({source:'card',text:cardQuote},sources,true)
-                    && !relationshipEvidence({source:'card',text:cardQuote},sources,false)) {
+                if (r.card_pair === true && relationshipEvidence({source:'card',text:cardQuote},sources,true,s,th)
+                    && !relationshipEvidence({source:'card',text:cardQuote},sources,false,s,th)) {
                     th.relCardBaseline.pair = true; th.relCardBaseline.known = true; th.relCardBaseline.note = cardQuote;
                 }
             }
             const baseline = th.relCardBaseline;
             const allSources = { ...sources,
+                storyMessages: (ctx().chat || []).filter(m=>m && !m.is_system),
                 story: (ctx().chat || []).filter(m=>m && !m.is_system).map(m=>m.mes || '').join('\n'),
                 dm: th.msgs.filter(m=>!m.sys).map(m=>m.text || '').join('\n') };
             const oldDecision = th.relPairDecision;
             let decision = oldDecision;
-            if (decision && !relationshipEvidence(decision,allSources,decision.pair)) {
+            if (decision && !relationshipEvidence(decision,allSources,decision.pair,s,th)) {
                 decision = undefined; delete th.relPairDecision;
             }
             const wasPair = (th.pair === true || (th.kind === 'char' && s.profile.relWithChar)) && !(oldDecision?.pair === true && !decision);
             let pair = decision?.pair ?? (wasPair || baseline.pair === true);
             const value = r.pair === true || r.pair === 'true' ? true : r.pair === false || r.pair === 'false' ? false : null;
-            const quote = value !== null ? relationshipEvidence(r.pair_evidence,sources,value) : '';
+            const quote = value !== null ? relationshipEvidence(r.pair_evidence,sources,value,s,th) : '';
             if (quote && (r.pair_evidence.source !== 'card' || (!wasPair && decision?.pair !== false))) {
                 pair = value;
                 if (r.pair_evidence.source !== 'card') th.relPairDecision = { pair, cardKey, source:r.pair_evidence.source, text:quote };
@@ -1437,6 +1585,15 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     /* ───────────────────────── часы истории ───────────────────────── */
 
     const gameMode = (s) => s?.clock?.mode === 'game';
+    function alignStudyClock(s, ts) {
+        const delta = ts - (s.enforceFrom || s.clock.t);
+        s.enforceFrom = ts;
+        s.quarter.start = ts;
+        s.wallet.lastStipend = ts;
+        if (s.lowGpaSince) s.lowGpaSince += delta;
+        for (const t of s.tasks) if (!t.done) { t.issued += delta; t.deadline += delta; }
+        s.studyClockPending = false; s.studyClockVersion = 1;
+    }
     /** Текущее время для учёбы, встреч и заданий: часы истории или реальные часы. */
     function NOW() {
         const md = ctx().chatMetadata;
@@ -1456,7 +1613,9 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     /** Двигает часы истории. back=true — точное время Horae/истории или ручная установка. */
     function setClock(s, ts, source, back = false) {
         if (!gameMode(s) || !Number.isFinite(ts)) return false;
-        if (ts === s.clock.t || (ts < s.clock.t && !back)) return false;
+        if (ts < s.clock.t && !back) return false;
+        if (s.auth && s.studyClockPending) alignStudyClock(s, ts);
+        if (ts === s.clock.t) return false;
         const jump = ts - s.clock.t;
         s.clock.t = Math.round(ts);
         s.clock.storyInitialized = true;
@@ -1576,7 +1735,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     }
     function pollHoraeClock() {
         const s = S();
-        if (s?.auth && !storyGenerating && !uniHubGenerating) syncHoraeClock(s);
+        if (s?.auth && !storyGenerating && !uniHubGenerating()) syncHoraeClock(s);
     }
     function chatClockText(message) {
         return String(message?.mes || '')
@@ -1604,6 +1763,9 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     /** Выбор сюжетных часов без модели: переходы из текста, затем сохранённое время + шаг. */
     function guessedStoryClock(text, base, initial = false) {
         const d = new Date(base);
+        // Планы и условия не являются уже произошедшим переходом времени.
+        text = String(text || '').split(/\n|(?<=[.!?])\s+/).filter(line =>
+            !/(увидимся|встретимся|буду|будет|будем|собира(?:юсь|ется|емся)|планиру|если|может быть|хочу|хочешь|давай|приду|придёт|придет|зайду|вернусь)/i.test(line)).join('\n');
         if (/(следующ[а-яё]*\s+утро|наутро)/i.test(text)) return nextMorning(base);
         const jump = /(?:через|спустя)\s+(\d+|полчаса|час|полтора|два|три)\s*(минут[а-яё]*|час[а-яё]*|дн[а-яё]*|день)?/i.exec(text);
         if (jump) {
@@ -1659,10 +1821,12 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
         const messages = (ctx().chat || []).filter((m) => m && !m.is_system).slice(-12);
         const context = messages.map((m) => `${m.name || (m.is_user ? ctx().name1 : ctx().name2)}: ${chatClockText(m).slice(-1000)}`).join('\n').slice(-9000);
         const text = chatClockText(last || messages.at(-1)).slice(-2500);
-        const fallbackText = initial ? context : `${chatClockText(messages.at(-2))}\n${text}`;
+        const previous = messages.at(-2);
+        const fallbackText = initial ? context : `${previous?.is_user ? chatClockText(previous) : ''}\n${text}`;
         if (!messages.length) { if (current()) applyStoryClock(s, guessedStoryClock('', base, initial), 'UniHub: выбранное время', initial); return; }
         if (c.syncAI) {
             const r = await aiJSON(`Часы истории перед этим сообщением показывали: ${isoDay(base)} ${fmtT(base)} (${fmtFull(base)}).\nПоследние сообщения основного чата (учитывай сообщения пользователя и персонажа):\n${context}\n\n${initial ? 'Первичная установка времени: определяй текущий момент в конце этой истории, не добавляй шаг за старый ответ повторно.' : `Новый или изменённый ответ истории:\n${text}`}\n\nОпредели текущие дату и часы по истории. Приоритет — явно названное время текущей сцены, затем переходы («наступило утро», «через час», «на следующий день»). Не принимай прошлые воспоминания и будущие встречи за настоящее. Если точных часов нет, САМ ВЫБЕРИ правдоподобное сюжетное время по сцене; отметь inferred: true. ${initial ? 'Если нет никаких подсказок, выбери 09:00 на дате сохранённых часов. Не используй реальные часы устройства.' : 'Если нет подсказок, продолжай от сохранённых сюжетных часов: обычный разговор занимает 1–15 минут. Не возвращайся к старому времени из предыдущих сообщений без сюжетного основания.'}\nФормат: {"minutes":число минут от 0 до 1440 прошедших именно за новый ответ, "date":"ГГГГ-ММ-ДД текущей даты, если она определена по сюжету, иначе null", "time":"ЧЧ:ММ текущего или самостоятельно выбранного сюжетного времени, иначе null", "nextDay":true если наступил следующий день, "inferred":true если время выбрано самостоятельно, иначе false}`);
+            if (S() !== s) return;
             if (!current()) return;
             if (r && typeof r === 'object' && !Array.isArray(r)) {
                 let ts = base + clamp(Math.round(+r.minutes || 0), 0, 1440) * MIN;
@@ -1720,9 +1884,9 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     }
     function flushStorySync(s) {
         const state = storySyncState(s);
-        if (state.running || storyGenerating || uniHubGenerating || S() !== s) return state.running;
+        if (state.running || storyGenerating || uniHubGenerating() || S() !== s) return state.running;
         state.running = (async () => {
-            while (state.pending && S() === s && !storyGenerating && !uniHubGenerating) {
+            while (state.pending && S() === s && !storyGenerating && !uniHubGenerating()) {
                 state.pending = false;
                 syncHoraeClock(s);
                 const sourceKey = storySyncKey(), last = latestStoryReply(), clock = state.clock;
@@ -1834,6 +1998,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     async function extractLorePeople(s) {
         const c = ctx();
         const lore = await loreText(null);
+        if (S() !== s) return;
         const card = charCard();
         const r = await aiJSON(`${card}\n\nЛор (лорбук):\n${lore || '(нет)'}\n\nВыпиши всех упомянутых конкретных персонажей, кроме ${c.name2} и ${s.profile.name}. Для каждого определи role:
 - "student" — учится в этом университете;
@@ -1843,7 +2008,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
 Для одного персонажа используй одно полное имя. aliases — другие написания того же полного имени на русском или английском; не включай людей с другим именем или фамилией. temperament и speech выпиши только из данных карточки и лора: ценности и устойчивые черты, формальность, юмор, словарь, отношение к эмодзи и сленгу. Если манера не описана — пусто, не придумывай её известному NPC.\nФормат: [{"name":"имя как в лоре","aliases":[],"species":"вид по-русски","role":"student","faculty":"","year":2,"abilities":"","bio":"характер и важное, 1–2 предложения","temperament":"характер и ценности из источника","speech":"манера речи из источника","relation":"кем приходится ${c.name2}"}]. Если никого нет — пустой массив.`);
         if (S() !== s) return 0;
         const list = (Array.isArray(r) ? r : []).filter((p) => p && p.name).map((p) => ({
-            name: cleanName(p.name).slice(0, 50), aliases: (Array.isArray(p.aliases) ? p.aliases : []).map(cleanName).filter(n => personKey(n) === personKey(p.name)).slice(0, 8), species: cleanMsg(p.species || '').slice(0, 40),
+            name: cleanName(p.name).slice(0, 50), aliases: (Array.isArray(p.aliases) ? p.aliases : []).map(cleanName).filter(Boolean).slice(0, 8), species: cleanMsg(p.species || '').slice(0, 40),
             role: p.role === 'student' || p.role === 'staff' ? p.role : 'other',
             faculty: cleanMsg(p.faculty || '').slice(0, 60), year: clamp(parseInt(p.year, 10) || 0, 0, MAX_YEAR),
             abilities: cleanMsg(p.abilities || '').slice(0, 120), bio: cleanMsg(p.bio || '').slice(0, 300), relation: cleanMsg(p.relation || '').slice(0, 80),
@@ -1877,6 +2042,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     /** Клубы, мероприятия и традиции университета, описанные в лорбуке и карточке. */
     async function extractCampusLore(s) {
         const lore = await loreText(/клуб|секци|кружок|обществ|команд|мероприят|праздник|бал|фестивал|турнир|концерт|вечеринк|традици|ярмарк|club|event|society|festival|party|tradition/i);
+        if (S() !== s) return;
         s.campusLoreAt = Date.now();
         if (!lore) { save(s); return 0; }
         const r = await aiJSON(`${world(s)}\n\nЛор (лорбук и карточка):\n${lore}\n\nВыпиши ТОЛЬКО то, что реально упомянуто в лоре: студенческие клубы, секции и сообщества этого университета, а также мероприятия и традиции кампуса. Ничего не придумывай; если чего-то нет — пустой массив.\nФормат: {"clubs":["название"],"events":[{"title":"","when":"когда проходит","place":"","desc":"одно предложение"}]}`);
@@ -1961,7 +2127,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     function updateInjection() {
         const c = ctx();
         if (typeof c.setExtensionPrompt !== 'function') return;
-        try { c.setExtensionPrompt(OLD_MODULE, '', 1, 0); c.setExtensionPrompt(MODULE, buildInjection(), 1, Number(cfg().injectDepth) || 2, false, 0); }
+        try { c.setExtensionPrompt(OLD_MODULE, '', 1, 0); c.setExtensionPrompt(MODULE, buildInjection(), 1, cfg().injectDepth, false, 0); }
         catch (e) { logErr('[UniHub] inject', e); }
     }
 
@@ -1969,11 +2135,15 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
 
     const ui = { deliveryTab: 'food', gcat: 'all', open: false, tab: 'feed', view: null, param: null, studyTab: 'schedule', marketTab: 'buy', channel: 'all', diet: 'all', mcat: 'all', schedDay: null, busy: '' };
     let lastKey = '';
+    let busyJob = null;
 
     async function withBusy(label, fn) {
         if (ui.busy) { toast('info', 'Подождите, предыдущий запрос ещё выполняется.'); return; }
+        const job = { state: S() }; busyJob = job;
         ui.busy = label; render();
-        try { return await fn(); } finally { ui.busy = ''; render(); }
+        try { return await fn(); } finally {
+            if (busyJob === job) { busyJob = null; ui.busy = ''; if (S() === job.state) render(); }
+        }
     }
 
     /* ───────────────────────── UI: разметка ───────────────────────── */
@@ -2388,7 +2558,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
         <small class="sh-muted">Выдано ${fmtD(t.issued)}. Срок сдачи: ${fmtD(t.deadline)}${!t.done && !t.expired ? ` (${left(t.deadline)})` : ''}.</small></div>
         ${t.done ? `<div class="sh-card"><h4>Ваш ответ</h4><p>${esc(t.answer)}</p><div class="sh-grade g${t.grade}">${t.grade}</div><p>${esc(t.comment)}</p></div>`
         : t.expired ? empty('Срок доп. задания истёк.')
-            : `<div class="sh-card sh-form"><textarea id="sh-ans" rows="7" placeholder="Ваш ответ, 3–10 предложений"></textarea>
+            : `<div class="sh-card sh-form"><textarea id="sh-ans" rows="7" placeholder="Ваш ответ, 3–10 предложений">${esc(t.answer || '')}</textarea>
           ${t.overdue ? '<small class="sh-muted">Срок прошёл: оценка будет не выше 3, но сдача откроет возможность снять нарушение.</small>' : ''}
           <button class="sh-btn" data-act="submit" data-id="${t.id}" ${t.desc ? '' : 'disabled'}>Сдать на проверку</button></div>`}`;
     }
@@ -2528,6 +2698,9 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     }
     /** Оформляет заказ еды: доставка в историю через 1–2 ответа (в режиме времени истории). */
     function placeFoodOrder(s, lines, kind = 'food') {
+        if (!Array.isArray(lines) || !lines.length || lines.some(l => !Number.isFinite(l.item?.price) || l.item.price <= 0 || !Number.isInteger(l.qty) || l.qty < 1 || l.qty > 100)) {
+            toast('warning', 'В заказе некорректная цена или количество. Проверьте позиции.'); return false;
+        }
         const total = lines.reduce((a, l) => a + l.item.price * l.qty, 0);
         const title = lines.map((l) => `${l.qty > 1 ? `${l.qty} × ` : ''}${l.item.title}`).join(', ');
         if (!pay(s, total, `${kind === 'grocery' ? 'Продукты' : 'Доставка'}: ${title}`)) { render(); return false; }
@@ -2642,7 +2815,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     function applyTheme() { const ph = document.getElementById('unihub-phone'); if (ph) ph.dataset.theme = THEMES[cfg().theme] ? cfg().theme : 'pearl'; }
     function settingsView(s) {
         const c = cfg();
-        const num = (k, l, step = 1) => `<label>${l}<input type="number" step="${step}" data-change="cfg" data-k="${k}" value="${esc(c[k])}"></label>`;
+        const num = (k, l, step = 1) => `<label>${l}<input type="number" step="${step}" min="${CFG_RANGES[k][0]}" max="${CFG_RANGES[k][1]}" data-change="cfg" data-k="${k}" value="${esc(c[k])}"></label>`;
         return `${head('Настройки')}
         <div class="sh-card"><h4>Оформление</h4><div class="sh-themes">${Object.entries(THEMES).map(([k, [n, sw]]) => `<button class="sh-theme ${(cfg().theme || 'pearl') === k ? 'on' : ''}" data-act="setTheme" data-t="${k}"><div class="sw">${sw.map((x) => `<span style="background:${x}"></span>`).join('')}</div>${n}</button>`).join('')}</div></div>
         ${gameMode(s) ? '<div class="sh-card"><h4>Время учёбы</h4><p class="sh-muted">Включено время истории: пока вы не играете, часы стоят. Управление — нажмите на часы вверху.</p></div>' : ''}
@@ -2673,7 +2846,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
 
     function logText() {
         const c = ctx();
-        const head = `UniHub 1.17.5 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
+        const head = `UniHub 1.17.6 | ${navigator.userAgent} | API: ${c.mainApi || c.main_api || '?'} | generateRaw: ${typeof c.generateRaw} | loadWorldInfo: ${typeof c.loadWorldInfo} | setExtensionPrompt: ${typeof c.setExtensionPrompt}`;
         return [head, ...LOG.map((l) => `[${fmtD(l.t)}] ${l.where}: ${l.text}`)].join('\n\n');
     }
     function logView() {
@@ -2728,7 +2901,9 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
         const scr = ph.querySelector('.sh-screen');
         const key = [ui.tab, ui.view, ui.param, ui.studyTab, ui.marketTab].join('|');
         const saved = {};
-        scr.querySelectorAll('input[id], textarea[id], select[id]').forEach((el) => { saved[el.id] = el.value; });
+        scr.querySelectorAll('input[id], textarea[id], select[id]').forEach((el) => {
+            saved[el.id] = { value: el.value, checked: el.checked, start: el.selectionStart, end: el.selectionEnd };
+        });
         const focusId = document.activeElement && scr.contains(document.activeElement) ? document.activeElement.id : null;
         const top = scr.scrollTop;
 
@@ -2738,7 +2913,14 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
         ph.querySelector('.sh-overlay').innerHTML = ui.busy ? `<div class="sh-busy"><i class="fa-solid fa-spinner fa-spin"></i><span>${esc(ui.busy)}</span></div>` : '';
 
         if (key === lastKey) {
-            for (const [id, v] of Object.entries(saved)) { const el = byId(id); if (el && scr.contains(el)) el.value = v; }
+            for (const [id, v] of Object.entries(saved)) {
+                const el = byId(id); if (!el || !scr.contains(el)) continue;
+                if (/checkbox|radio/.test(el.type)) el.checked = v.checked; else el.value = v.value;
+                if (typeof v.start === 'number' && typeof el.setSelectionRange === 'function') el.setSelectionRange(v.start, v.end);
+            }
+            scr.querySelectorAll('[data-change="idSel"]').forEach(el => {
+                const other = byId(el.dataset.other); if (other) other.style.display = el.value === '__other' ? '' : 'none';
+            });
             scr.scrollTop = top;
             if (focusId) byId(focusId)?.focus();
         } else scr.scrollTop = 0;
@@ -2875,7 +3057,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
         const waitForFree = !!(p.sleeping || (p.busy && Math.random() < 0.5));
         const delay = p.online ? (Math.random() < 0.6 ? 0 : messengerRand(1, 3) * MIN) : messengerRand(3, 7) * MIN;
         const job = { id: uid(), at: now + delay, waitForFree, checkIn: !p.online && !waitForFree,
-            userKey: lastUserKey(th), initiate: opts.initiate || '', proactive: !!opts.proactive, attempts: 0 };
+            userKey: lastUserKey(th), initiate: opts.initiate || '', proactive: !!opts.proactive, meeting: opts.meeting || old?.meeting || null, attempts: 0 };
         // Несколько сообщений до ответа объединяются; ожидание не начинается заново.
         if (old && !opts.initiate) { job.at = Math.min(old.at, job.at); job.waitForFree = old.waitForFree; job.checkIn = old.checkIn; }
         th.pendingReply = job;
@@ -2894,7 +3076,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
         }
         messengerQueued.add(job);
         enqueue(s, async () => {
-            if (storyGenerating || uniHubGenerating || th.pendingReply !== job) return;
+            if (storyGenerating || uniHubGenerating() || th.pendingReply !== job) return;
             const sceneState = await checkSceneContact(s, th);
             if (S() !== s || th.pendingReply !== job || storyGenerating) return;
             if (sceneState !== 'apart') { holdSceneMessage(s, th, job, sceneState); return; }
@@ -2909,10 +3091,15 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
                 current.online = true; current.visitUntil = Date.now() + 2 * MIN; current.until = current.visitUntil;
             }
             try {
-                const r = await reply(s, th, { initiate: job.initiate, proactive: job.proactive, valid, availability: p.busy ? 'Собеседник занят и ненадолго заглянул в мессенджер. Ответь коротко, не утверждай, что он уже освободился.' : '' });
+                const r = await reply(s, th, { initiate: job.initiate, proactive: job.proactive, meeting: job.meeting, valid, availability: p.busy ? 'Собеседник занят и ненадолго заглянул в мессенджер. Ответь коротко, не утверждай, что он уже освободился.' : '' });
                 if (th.pendingReply !== job || S() !== s) return;
                 if (r?.sceneBlocked) { holdSceneMessage(s, th, job, r.sceneBlocked); return; }
-                if (r?.stale) { job.at = Date.now() + 20 * 1000; return; }
+                if (r?.stale) {
+                    const state = sceneContactState(s, th);
+                    if (state !== 'apart') holdSceneMessage(s, th, job, state);
+                    else job.at = Date.now() + 20 * 1000;
+                    return;
+                }
                 delete th.pendingReply;
                 if (r?.sent) { th.lastIncomingAt = Date.now(); th.lastIncomingStoryKey = sourceKey; }
             } catch (e) {
@@ -2967,7 +3154,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
         }
         for (const th of s.threads) if (th.typing && !messengerActive.has(th)) { th.typing = false; changed = true; }
         for (const th of s.threads) if (th.pendingReply?.proactive && (!cfg().proactiveDMs || !hasStoryProgress())) { delete th.pendingReply; changed = true; }
-        if (!storyGenerating && !uniHubGenerating) {
+        if (!storyGenerating && !uniHubGenerating()) {
             for (const pd of [...(s.pendingDMs || [])]) if (now >= pd.at && startDM(s, pd)) { s.pendingDMs = s.pendingDMs.filter((x) => x !== pd); changed = true; }
             for (const th of s.threads) if (th.pendingReply && dispatchMessengerReply(s, th, th.pendingReply, now)) changed = true;
             if (initiatives && planInitiative(s, now)) changed = true;
@@ -2985,9 +3172,14 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
         try {
             const hist = th.msgs.filter((m) => !m.sys).slice(-14).map((m) => `${m.me ? s.profile.name : (m.from || th.name)}: ${m.text}`).join('\n');
             let extra = opts.availability ? `\n\n${opts.availability}` : '';
+            if (opts.meeting) {
+                const mt = opts.meeting, bad = meetProblem(s, mt.at, mt.place);
+                extra += `\n\nОтвет на приглашение: ${KINDS[mt.kind]}, ${fmtWhen(mt.at)}, ${PLACES[mt.place]}${mt.note ? ` (${mt.note})` : ''}. Реши, согласен ли собеседник, по его характеру, отношениям и последним сообщениям. Добавь в JSON поле accept: true только при явном согласии именно на эту встречу; иначе false.${bad ? ` Исходная встреча теперь недоступна: ${bad}. accept обязательно false; можно обсудить другое время, но не добавлять прошедшую встречу.` : ''}`;
+            }
             if (th.kind === 'char') {
                 const story = recentStory(Number(cfg().chatContext) || 0);
                 const lore = await loreFor(`${story}\n${hist}`);
+                if (S() !== s) return;
                 const scene = currentScene();
                 extra += `\n\n${charCard()}${lore ? `\n\nЛор мира, связанный с разговором:\n${lore}` : ''}${story ? `\n\nПоследние события основной истории (${th.name} их помнит):\n${story}` : ''}${scene ? `\n\n=== ТЕКУЩИЙ МОМЕНТ ИСТОРИИ (самое важное) ===\n${scene}\n=== конец ===\nПереписка происходит ПРЯМО СЕЙЧАС, в этот самый момент истории. Строго соблюдай его: где находится ${th.name}, что делает, рядом ли ${s.profile.name}, время суток. Нельзя противоречить сцене — например, писать «я на патруле», если в сцене ${th.name} стоит у двери ${s.profile.name}. Если они сейчас рядом, не создавай сообщение: верни reply пустой строкой. Общение происходит вслух в основном чате.` : ''}`;
             }
@@ -3010,10 +3202,13 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             if (S() !== s || (opts.valid && !opts.valid())) return { stale: true };
             if (sceneContactState(s, th) !== 'apart') return { sceneBlocked: sceneContactState(s, th) };
             const js = th.kind === 'group' ? null : parseJSON(raw);
+            if (!String(raw || '').trim() || (js && typeof js.reply !== 'string')) throw new Error('ИИ не вернул сообщение собеседника');
             let r = cleanReply(js && typeof js.reply === 'string' ? js.reply : raw).replace(/^["«]+|["»]+$/g, '');
             const lastMine = [...th.msgs].reverse().find((m) => m.me);
             if (js && !opts.initiate && th.kind !== 'group') updateRel(s, th, Number(js.delta) || 0, js.flirt === true || js.flirt === 'true', 8, lastMine ? `переписка в UniHub: ${s.profile.name} написал(а) «${lastMine.text.slice(0, 140)}»` : '');
-            if (!opts.initiate && js?.meet && typeof js.meet === 'object') detectMeet(s, th, js.meet);
+            if (opts.meeting && r && js?.accept === true && !meetProblem(s, opts.meeting.at, opts.meeting.place)) {
+                const mt = opts.meeting; addMeeting(s, th, mt.kind, mt.place, mt.note, mt.at);
+            } else if (!opts.initiate && js?.meet && typeof js.meet === 'object') detectMeet(s, th, js.meet);
             if (r) {
                 let from;
                 if (th.kind === 'group') { const m = r.match(/^\s*[*_]{0,2}([^:*_\n]{2,30})[*_]{0,2}\s*:\s*[*_]{0,2}\s*/); if (m) { from = m[1].trim(); r = r.slice(m[0].length); } }
@@ -3108,6 +3303,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
     function engageMyPost(s, p) {
         enqueue(s, async () => {
             const list = await aiComments(s, p, 'Сгенерируй 5–7 комментариев от разных студентов, которые увидели этот пост. Иногда они отвечают друг другу (replyTo).', 'этот пост');
+            if (S() !== s) return;
             applyScore(s, list.score, p);
             if (list.followup) scheduleDM(s, list.followup, list.find((c) => c.author === cleanName(list.followup.from))?.species, `Пост ${s.profile.name}: «${p.text.slice(0, 200)}»\n${list.map((c) => `${c.author}: ${c.text}`).join('\n')}`);
             const now = Date.now();
@@ -3144,7 +3340,9 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             if (d.pre === 'sh-a') readAuth(s);
             return withBusy('Ищу способности в лоре…', async () => {
                 const lore = await loreText(/способн|сил[аы]|магия|дар|ability|power|skill|магич|чары|заклин/i);
+                if (S() !== s) return;
                 const r = await aiJSON(`${world(s)}\n\nЛор (лорбук и карточка):\n${lore || '(нет данных)'}\n\nВыпиши сверхъестественные способности, которые упоминаются в этом мире (в лоре, описании персонажа, сценарии). Только реально упомянутые, названия по-русски. visible — заметна ли способность окружающим со стороны (крылья, огонь в руках — да; телепатия — нет). Если ничего нет — пустой массив.\nФормат: [{"name":"способность","visible":false}]`);
+                if (S() !== s) return;
                 const list = (Array.isArray(r) ? r : []).map((x) => typeof x === 'string' ? { n: cleanMsg(x).slice(0, 60), v: false } : { n: cleanMsg(x?.name || '').slice(0, 60), v: x?.visible === true }).filter((x) => x.n);
                 const seen = new Set(), uniq = list.filter((x) => !seen.has(x.n) && seen.add(x.n)).slice(0, 40);
                 if (!uniq.length) return toast('info', 'В лоре и карточке способности не найдены. Выберите из списка или впишите свою.');
@@ -3172,7 +3370,9 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             if (d.pre === 'sh-a') readAuth(s);
             return withBusy('Ищу виды в лоре…', async () => {
                 const lore = await loreText(/вид|раса|species|race|полулюд|демихьюман|demi|вампир|оборот|эльф|фейри|демон|существ|creature/i);
+                if (S() !== s) return;
                 const r = await aiJSON(`${world(s)}\n\nЛор (лорбук и карточка):\n${lore || '(нет данных)'}\n\nВыпиши виды и расы разумных существ, которые упоминаются в этом мире (в лоре, описании персонажа, сценарии). Только те, что реально упомянуты, названия по-русски, как в мире. Если ничего нет — пустой массив.\nФормат: ["вид", "вид"]`);
+                if (S() !== s) return;
                 const list = (Array.isArray(r) ? r : []).map((x) => cleanMsg(typeof x === 'string' ? x : x?.name || '').slice(0, 50)).filter(Boolean);
                 const uniq = [...new Set(list)].slice(0, 40);
                 if (!uniq.length) return toast('info', 'В лоре и карточке виды не найдены. Выберите из списка или впишите свой.');
@@ -3181,7 +3381,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
                 save(s);
             });
         },
-        loadFac: (d, el, s) => { readAuth(s); return withBusy('Ищу факультеты в лоре…', async () => { s.faculties = await loadFaculties(s); save(s); }); },
+        loadFac: (d, el, s) => { readAuth(s); return withBusy('Ищу факультеты в лоре…', async () => { const list = await loadFaculties(s); if (S() !== s) return; s.faculties = list; save(s); }); },
         pickFac: (d, el, s) => { readAuth(s); s.profile.faculty = s.faculties[+d.i]?.name || ''; const f = byId('sh-a-fac'); if (f) f.value = ''; save(s); render(); },
         login: (d, el, s) => {
             readAuth(s);
@@ -3193,14 +3393,18 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             if (!fac) return toast('warning', 'Выберите факультет или впишите свой.');
             s.profile.faculty = fac;
             return withBusy('Составляю расписание…', async () => {
-                s.schedule = await genSchedule(s, fac);
+                const schedule = await genSchedule(s, fac);
+                if (S() !== s) return;
+                s.schedule = schedule;
                 enqueue(s, async () => { const n = await extractLorePeople(s); if (n) notify(s, `👥 В UniHub появились студенты из вашего мира: ${n}`, 'important'); });
                 enqueue(s, async () => { await extractCampusLore(s); });
                 enqueue(s, async () => { await genClubs(s); });
                 s.auth = true; s.enforceFrom = NOW(); s.quarter = { n: 1, start: NOW() };
+                s.studyClockPending = gameMode(s) && !s.clock.storyInitialized;
+                if (!s.studyClockPending) s.studyClockVersion = 1;
                 s.expelled = false; s.expelReason = '';
                 const c = ctx();
-                if (c.name2 && !c.groupId && !s.threads.some((t) => t.kind === 'char')) s.threads.push({ id: uid(), name: c.name2, species: '', bio: '', kind: 'char', msgs: [], t: NOW(), unread: 0, rel: 0 });
+                if (c.name2 && !c.groupId && !s.threads.some((t) => t.kind === 'char')) s.threads.push({ id: uid(), name: c.name2, species: '', bio: '', kind: 'char', msgs: [], t: Date.now(), unread: 0, rel: 0 });
                 notify(s, `🎓 Добро пожаловать, ${s.profile.name}! Расписание факультета «${fac}» готово.`, 'important');
                 ui.tab = 'study'; ui.studyTab = 'schedule'; ui.view = null;
                 save(s);
@@ -3252,6 +3456,7 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             const target = replyTo || (p.mine ? '' : p.author);
             const list = await aiComments(s, p, `${s.profile.name} только что написал(а) комментарий${replyTo ? ` в ответ ${replyTo}` : ''}: «${text}». Сгенерируй 1–3 ответа в ветке. ${target ? `${target} может ответить ${s.profile.name} (replyTo: "${s.profile.name}"), если это соответствует характеру и текущему моменту; не принуждай к ответу, допустим пустой список. ` : 'Ответь от лица других студентов. '}Может подключиться ещё кто-то из комментаторов или новый студент.`, 'этот комментарий');
             p.loadingComments = false;
+            if (S() !== s) return;
             applyScore(s, list.score, null);
             const fu = list.followup || guessFollowup(s, p, text, replyTo, list);
             if (fu) scheduleDM(s, fu, list.find((c) => c.author === cleanName(fu.from))?.species || s.feed.find((x) => x.author === cleanName(fu.from))?.species, `Пост ${p.author}: «${p.text.slice(0, 200)}»\n${shownComments(p).slice(-6).map((c) => `${c.author}: ${c.text}`).join('\n')}\n${list.map((c) => `${c.author}: ${c.text}`).join('\n')}`);
@@ -3267,43 +3472,31 @@ ${sources.dm || '(не переписывались)'}${th.contactContext ? `\n�
             const th = s.threads.find((t) => t.id === d.id);
             if (!th) return;
             const kind = val('sh-m-kind'), place = val('sh-m-place'), note = val('sh-m-note').slice(0, 80);
-            const [hh, mm] = (val('sh-m-time') || '18:00').split(':').map(Number);
+            const minutes = clockMinutes(val('sh-m-time') || '18:00');
+            if (minutes === null) return toast('warning', 'Укажите время от 00:00 до 23:59.');
+            const hh = Math.floor(minutes / 60), mm = minutes % 60;
             const day = new Date(NOW()); day.setDate(day.getDate() + (parseInt(val('sh-m-day'), 10) || 0)); day.setHours(hh || 0, mm || 0, 0, 0);
-            const at = day.getTime(), now = NOW();
+            const at = day.getTime();
             const bad = meetProblem(s, at, place);
             if (bad) return toast('warning', bad);
             if (d.agreed) {
                 addMeeting(s, th, kind, place, note, at);
                 th.pendingMeet = null;
-                th.msgs.push({ sys: true, text: `📅 Встреча добавлена: ${KINDS[kind].toLowerCase()}, ${fmtWhen(at)}, ${PLACES[place]}${note ? ` (${note})` : ''}`, t: now });
+                th.msgs.push({ sys: true, text: `📅 Встреча добавлена: ${KINDS[kind].toLowerCase()}, ${fmtWhen(at)}, ${PLACES[place]}${note ? ` (${note})` : ''}`, t: Date.now() });
                 updateRel(s, th, 1, kind === 'date');
                 ui.view = 'thread'; ui.param = th.id;
                 save(s); render();
                 return;
             }
-            return withBusy(`Ждём ответа от ${th.name}…`, async () => {
+            return withBusy(`Отправляю приглашение ${th.name}…`, async () => {
                 const state = await checkSceneContact(s, th);
                 if (S() !== s || storyGenerating) return;
                 if (state !== 'apart') return toast('info', state === 'together' ? 'Собеседник рядом. Обсудите встречу вслух в основном чате.' : 'Присутствие собеседника не удалось определить. Приглашение пока не отправлено.');
-                const sceneKey = sceneContactKey(th);
-                const m = { with: th.name, kind, place, note };
-                th.msgs.push({ me: true, text: `📅 Приглашение: ${meetText(m)}, ${fmtWhen(at)}`, t: now });
-                const r = await aiJSON(`${world(s, th.kind !== 'char')}${th.kind === 'char' ? `
-${charCard()}` : ''}
-
-${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species})` : ''} через UniHub: ${KINDS[kind]}, ${fmtWhen(at)}, ${PLACES[place]}${note ? `, ${note}` : ''}. Отношение ${th.name} к ${s.profile.name}: ${relLabel(th)} (${Math.round(th.rel || 0)} из 100).${th.kind === 'char' && s.profile.relWithChar ? ' Они пара.' : ''} Реши, соглашается ли ${th.name}, учитывая отношения, характер${place === 'skip' ? ', то, что это прогул,' : ''} и тип встречи.
-Формат: {"accept":true,"reply":"ответ в мессенджере, 1–2 предложения"}`);
-                if (S() !== s) return;
-                if (storyGenerating || sceneContactKey(th) !== sceneKey || sceneContactState(s, th) !== 'apart') { queueMessengerReply(s, th); save(s); return; }
-                const accept = r?.accept === true || r?.accept === 'true';
-                th.msgs.push({ me: false, text: cleanMsg(r?.reply || (accept ? 'Давай!' : 'Прости, не получится.')).slice(0, 500), t: NOW() });
-                th.t = NOW();
-                if (accept) {
-                    addMeeting(s, th, kind, place, note, at);
-                    updateRel(s, th, 2, kind === 'date');
-                } else updateRel(s, th, -1, false);
+                const meeting = { with: th.name, kind, place, note, at };
+                th.msgs.push({ me: true, text: `📅 Приглашение: ${meetText(meeting)}, ${fmtWhen(at)}`, t: Date.now() });
+                th.t = Date.now();
                 ui.view = 'thread'; ui.param = th.id;
-                save(s);
+                return queueMessengerReply(s, th, { meeting });
             });
         },
         mentionClass: (d, el, s) => {
@@ -3353,7 +3546,7 @@ ${s.profile.name} приглашает ${th.name}${th.species ? ` (${th.species}
             notify(s, `❌ Встреча с ${m.with} отменена.`, 'social');
             if (th) {
                 updateRel(s, th, sameDay ? -5 : -2, false, 8, `${s.profile.name} отменил(а) встречу${sameDay ? ' в последний момент' : ''}`);
-                th.msgs.push({ me: true, text: `❌ Прости, не получится ${fmtWhen(m.at)} — отменяю встречу.`, t: NOW() });
+                th.msgs.push({ me: true, text: `❌ Прости, не получится ${fmtWhen(m.at)} — отменяю встречу.`, t: Date.now() });
                 save(s); render();
                 return queueMessengerReply(s, th);
             }
@@ -3389,6 +3582,7 @@ ${story}
 
 Выполнил(а) ли ${s.profile.name} это задание в истории? Засчитывай только если действие действительно произошло в тексте, а не просто упомянуто или запланировано.
 Формат: {"done":true,"comment":"коротко, почему"}`);
+                if (S() !== s) return;
                 if (r?.done === true || r?.done === 'true') { completeQuest(s, q); save(s); }
                 else toast('info', `Пока не засчитано: ${cleanMsg(r?.comment || 'в истории не видно выполнения')}`);
             });
@@ -3481,7 +3675,7 @@ ${story}
             d = { ...d, name: personName(s,d.name) };
             const f = s.social.following;
             s.social.following = f.includes(d.name) ? f.filter((n) => n !== d.name) : [...f, d.name];
-            if (!f.includes(d.name)) questEvent(s, 'follow');
+            if (!f.includes(d.name)) questEvent(s, 'follow', 1, '', '', { person: d.name });
             if (!f.includes(d.name) && Math.random() < 0.5) { s.social.followers += 1; notify(s, `👥 ${d.name} подписался(ась) на вас в ответ`, 'social'); }
             save(s); render();
         },
@@ -3541,6 +3735,7 @@ ${NEW_VOICE_RULE}
             dt.profiles = [];
             return withBusy('Подбираю анкеты…', async () => {
                 const r = await aiJSON(`${world(s)}\n\n${loreStudentsLine(s)}\nЕсли среди студентов из лора есть подходящие под фильтры — включи 1–2 из них с их настоящими данными, остальных придумай.\n${s.faculties.length ? `Поле faculty — один из факультетов этого университета: ${s.faculties.map((f) => f.name).join(', ')}${s.profile.faculty && !s.faculties.some((f) => f.name === s.profile.faculty) ? `, ${s.profile.faculty}` : ''}. Факультеты у анкет разные.\n` : ''}Сгенерируй 5 анкет студентов этого университета для ${dt.mode === 'friends' ? 'поиска друзей' : 'романтических знакомств'} в UniHub. Вид пользователя: ${s.profile.species || 'не указан'}. Фильтры: пол — ${{ m: 'только парни', f: 'только девушки', nb: 'только небинарные' }[dt.fGender] || 'любой'}; вид — ${dt.fSpecies || 'любой'}; способности — ${dt.fAbility === NO_ABIL ? 'без сверхъестественных способностей' : dt.fAbility || 'любые'}. ${mundane(s) ? 'Оцени совместимость характеров и интересов с пользователем (compat 0–100) и коротко объясни. Все анкеты — обычные люди, species оставь пустым, abilities — хобби и таланты.' : 'Оцени межвидовую совместимость с пользователем (compat 0–100) и коротко объясни.'}\nФормат: [{"name":"Имя","age":20,"species":"","faculty":"","abilities":"","bio":"до 200 символов","compat":75,"compatNote":"одно предложение","verified":true,"gender":"m, f или nb"}]`);
+                if (S() !== s) return;
                 if (!Array.isArray(r) || !r.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
                 dt.profiles = r.filter((p) => p && p.name).map((p) => ({ id: uid(), name: personName(s,p.name), age: parseInt(p.age, 10) || 19, species: SP(s, p.species), faculty: String(p.faculty || '').slice(0, 60), abilities: String(p.abilities || '').slice(0, 120), bio: String(p.bio || '').slice(0, 300), compat: clamp(parseInt(p.compat, 10) || 50, 0, 100), compatNote: String(p.compatNote || '').slice(0, 160), verified: p.verified !== false }));
                 save(s);
@@ -3575,7 +3770,7 @@ ${NEW_VOICE_RULE}
         schedDay: (d) => { ui.schedDay = +d.d; render(); },
         regenSchedule: (d, el, s) => {
             if (!confirm('Составить расписание заново? Посещаемость прошлых пар сохранится.')) return;
-            return withBusy('Составляю расписание…', async () => { s.schedule = await genSchedule(s, s.profile.faculty); s.enforceFrom = NOW(); save(s); });
+            return withBusy('Составляю расписание…', async () => { const schedule = await genSchedule(s, s.profile.faculty); if (S() !== s) return; s.schedule = schedule; s.enforceFrom = NOW(); save(s); });
         },
         checkin: (d, el, s) => {
             const o = findOcc(s, d.key); const now = NOW();
@@ -3593,7 +3788,10 @@ ${NEW_VOICE_RULE}
             if (reason.length < 10) return toast('warning', 'Опишите причину подробнее.');
             return withBusy('Деканат рассматривает запрос…', async () => {
                 const r = await aiJSON(`${world(s)}\n\nСтудент ${s.profile.name} просит признать отсутствие на паре «${o.cl.subject}» (${fmtD(o.start)}) уважительным. Причина: «${reason}». Ты — деканат. Уважительные причины: болезнь, форс-мажор, официальные мероприятия университета, особенности вида (полнолуние для оборотня, солнце для вампира и т.п.). Неуважительные: лень, проспал, свидание, «не хотелось».\nФормат: {"valid":true,"reply":"ответ деканата, 1 предложение"}`);
-                const valid = r?.valid === true || r?.valid === 'true';
+                if (S() !== s) return;
+                if (!r || ![true, false, 'true', 'false'].includes(r.valid)) return toast('warning', 'Не удалось получить решение деканата. Повторите запрос — попытка не потрачена.');
+                if (s.attendance[d.key] || s.excuses[d.key]) return;
+                const valid = r.valid === true || r.valid === 'true';
                 s.excuses[d.key] = { reason, valid, reply: String(r?.reply || (valid ? 'Причина признана уважительной.' : 'Причина не признана уважительной.')).slice(0, 300) };
                 if (valid) { s.attendance[d.key] = 'excused'; notify(s, `📝 Отсутствие на «${o.cl.subject}» признано уважительным.`); }
                 else notify(s, `📝 Деканат отклонил причину для «${o.cl.subject}». Придите на пару, иначе будет прогул.`, 'warn');
@@ -3618,8 +3816,14 @@ ${NEW_VOICE_RULE}
             if (ans.length < 20) return toast('warning', 'Ответ слишком короткий.');
             return withBusy('Преподаватель проверяет работу…', async () => {
                 const r = await aiJSON(`${world(s)}\n\nТы — преподаватель предмета «${t.subject}». Оцени ответ студента по пятибалльной шкале (2 — неудовлетворительно, 3, 4, 5 — отлично). Строго, но справедливо: отписки и ответы не по теме — 2.\nЗадание: ${t.desc}\nОтвет студента: ${ans}\nФормат: {"grade":4,"comment":"1–2 предложения"}`);
-                let grade = Math.round(Number(r?.grade));
-                if (!(grade >= 2 && grade <= 5)) grade = ans.length > 300 ? 4 : 3;
+                if (S() !== s) return;
+                const gradeValue = r?.grade === '' || r?.grade == null ? NaN : Number(r.grade);
+                if (!Number.isInteger(gradeValue) || gradeValue < 2 || gradeValue > 5) {
+                    t.answer = ans; save(s);
+                    return toast('warning', 'Не удалось получить оценку. Ответ сохранён, попробуйте сдать работу ещё раз.');
+                }
+                if (t.done || t.expired || !s.tasks.includes(t)) return;
+                let grade = gradeValue;
                 const late = NOW() > t.deadline && !t.extra;
                 if (late) grade = Math.min(grade, 3);
                 Object.assign(t, { done: true, doneAt: NOW(), answer: ans, grade, comment: `${String(r?.comment || '').slice(0, 400)}${late ? ' Сдано после срока, оценка не выше 3.' : ''}` });
@@ -3647,6 +3851,7 @@ ${NEW_VOICE_RULE}
             if (!subj) return toast('warning', 'Сначала нужно расписание с предметами.');
             return withBusy('Ищу репетитора…', async () => {
                 const r = await aiJSON(`${world(s)}\n\nПридумай репетитора по предмету «${subj}» — старшекурсника или аспиранта этого университета.\nФормат: {"name":"","species":"","bio":"1–2 предложения, включая цену занятия в ₡"}`);
+                if (S() !== s) return;
                 const th = openThread(s, r?.name || `Репетитор (${subj})`, r?.species || '', `Репетитор по предмету «${subj}». ${r?.bio || ''}`);
                 th.msgs.push({ sys: true, text: `Запрос на помощь по «${subj}» отправлен.`, t: Date.now() });
                 save(s);
@@ -3655,6 +3860,7 @@ ${NEW_VOICE_RULE}
         groups: (d, el, s) => withBusy('Подбираю учебные группы…', async () => {
             const subjects = [...new Set(s.schedule.map((c) => c.subject))].join(', ');
             const r = await aiJSON(`${world(s)}\n\nПредложи 3 учебные группы для студента по его предметам: ${subjects}.\nФормат: [{"name":"","subject":"","when":"когда собираются"}]`);
+            if (S() !== s) return;
             s.groupOffers = Array.isArray(r) ? r.filter((g) => g && g.name).slice(0, 5).map((g) => ({ name: String(g.name).slice(0, 60), subject: String(g.subject || '').slice(0, 60), when: String(g.when || '').slice(0, 60) })) : [];
             if (!s.groupOffers.length) toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
             save(s);
@@ -3697,13 +3903,14 @@ ${NEW_VOICE_RULE}
                 const r = await aiJSON(`${world(s)}\n\n${grocery ? 'Продуктовый магазин кампуса с доставкой.' : 'Доставка готовой еды по кампусу из кафе и столовых.'} Студент хочет заказать то, чего нет в ассортименте: ${missing.join('; ')}.
 Для каждой позиции реши, можно ли это реально ${grocery ? 'купить' : 'заказать'} в этом мире (${mundane(s) ? 'обычный современный город и университет, без магии' : 'сверхъестественный мир этого университета — магические продукты здесь доступны'}). Если да — дай нормальное название по-русски${grocery ? ' с весом или объёмом' : ''}, место (${grocery ? 'магазин или лавка' : 'кафе или столовая'}), правдоподобную цену в ₡ (редкое и деликатесы дороже; для ориентира: ${prices}) и категорию из существующих: ${tags.join(', ')}. Если нельзя — коротко объясни почему и предложи замену из доступного, если она есть.
 Формат: [{"query":"как написал студент","ok":true,"title":"","place":"","price":120,"tag":"","reason":"","substitute":""}]`);
+                if (S() !== s) return;
                 const res = (Array.isArray(r) ? r : []).filter((x) => x && x.query);
                 if (!res.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
                 const found = {}, refused = [];
                 for (const x of res) {
                     const q = String(x.query).trim().toLowerCase();
-                    if ((x.ok === true || x.ok === 'true') && x.title && +x.price > 0) {
-                        const it = { id: uid(), title: cleanMsg(x.title).slice(0, 80), place: cleanMsg(x.place || (grocery ? 'Минимаркет кампуса' : 'Кафе кампуса')).slice(0, 60), price: clamp(Math.round(+x.price), 10, 2000), tags: [String(x.tag || tags[0] || 'другое').toLowerCase().slice(0, 24)], special: true };
+                    if ((x.ok === true || x.ok === 'true') && x.title && priceOf(x.price) !== null) {
+                        const it = { id: uid(), title: cleanMsg(x.title).slice(0, 80), place: cleanMsg(x.place || (grocery ? 'Минимаркет кампуса' : 'Кафе кампуса')).slice(0, 60), price: clamp(priceOf(x.price), 10, 2000), tags: [String(x.tag || tags[0] || 'другое').toLowerCase().slice(0, 24)], special: true };
                         list.unshift(it);
                         found[q] = it.title;
                     } else refused.push(`${x.query}${x.reason ? ` — ${cleanMsg(x.reason)}` : ''}${x.substitute ? `. Замена: ${cleanMsg(x.substitute)}` : ''}`);
@@ -3747,9 +3954,10 @@ ${NEW_VOICE_RULE}
             const r = await aiJSON(`${world(s)}\n\n${mundane(s) ? 'Составь меню доставки по кампусу обычного университета: кофе и напитки, выпечка и десерты, завтраки, ланчи, пицца, суши и азиатское, веганское, халяль, без глютена и т.п. Реалистичные кафе и столовые, цены в ₡ от 60 до 400.' : 'Составь меню доставки по кампусу для разных видов (кровь, сырое мясо, веган, нектар, эктоплазма, эмоции, огнеупорная еда, обычная еда и т.п.). Кафе и точки должны звучать как места этого университета.'}
 Нужно 28–32 позиции. Выбери 6–8 категорий (теги) и сделай в КАЖДОЙ категории минимум 4 позиции; у позиции 1–2 тега из этого набора. Названия блюд на русском.
 ${story ? `Последние события истории:\n${story}\nЕсли в истории ${ctx().name2} или кто-то из студентов упоминал, что хочет съесть или выпить что-то конкретное, — обязательно добавь это в меню (в подходящее кафе) и укажи wishedBy: имя того, кто хотел.\n` : ''}Формат: [{"title":"","place":"","price":150,"tags":["веган"],"wishedBy":""}] — теги короткие, строчными буквами.`);
-            const list = Array.isArray(r) ? r.filter((m) => m && m.title && +m.price > 0) : [];
+            if (S() !== s) return;
+            const list = Array.isArray(r) ? r.filter((m) => m && m.title && priceOf(m.price) !== null) : [];
             if (!list.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
-            s.menu = list.map((m) => ({ id: uid(), title: cleanMsg(m.title).slice(0, 80), place: cleanMsg(m.place || '').slice(0, 60), price: Math.round(+m.price), tags: (Array.isArray(m.tags) ? m.tags : []).map((t) => String(t).toLowerCase().slice(0, 20)).slice(0, 3), wishedBy: cleanName(m.wishedBy || '') }));
+            s.menu = list.map((m) => ({ id: uid(), title: cleanMsg(m.title).slice(0, 80), place: cleanMsg(m.place || '').slice(0, 60), price: priceOf(m.price), tags: (Array.isArray(m.tags) ? m.tags : []).map((t) => String(t).toLowerCase().slice(0, 20)).slice(0, 3), wishedBy: cleanName(m.wishedBy || '') }));
             s.menu.sort((a, b) => (b.wishedBy ? 1 : 0) - (a.wishedBy ? 1 : 0));
             ui.diet = 'all';
             save(s);
@@ -3761,9 +3969,10 @@ ${story ? `Последние события истории:\n${story}\nЕсли
             const story = recentStory(15);
             const r = await aiJSON(`${world(s)}\n\nСоставь ассортимент продуктового магазина кампуса для доставки: 32–36 продуктов для готовки, 7–9 категорий (молочное, мясо и рыба, бакалея, овощи и зелень, фрукты, хлеб и сладкое, специи и напитки${mundane(s) ? '' : ', продукты для разных видов этого мира'} и т.п.), минимум 3 продукта в каждой категории. Названия на русском, с объёмом или весом, где уместно. Цены в ₡ от 20 до 300.
 ${story ? `Последние события истории:\n${story}\nЕсли в истории ${ctx().name2}, ${s.profile.name} или кто-то ещё собирался приготовить конкретное блюдо — обязательно включи ВСЕ нужные для него ингредиенты и у каждого укажи forDish: название блюда.\n` : ''}Формат: [{"title":"","place":"магазин","price":80,"tags":["бакалея"],"forDish":""}] — одна категория в tags, строчными буквами.`);
-            const list = (Array.isArray(r) ? r : []).filter((m) => m && m.title && +m.price > 0);
+            if (S() !== s) return;
+            const list = (Array.isArray(r) ? r : []).filter((m) => m && m.title && priceOf(m.price) !== null);
             if (!list.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
-            s.groceries = list.map((m) => ({ id: uid(), title: cleanMsg(m.title).slice(0, 80), place: cleanMsg(m.place || 'Минимаркет кампуса').slice(0, 60), price: Math.round(+m.price), tags: (Array.isArray(m.tags) ? m.tags : []).map((t) => String(t).toLowerCase().slice(0, 24)).slice(0, 1), forDish: cleanMsg(m.forDish || '').slice(0, 60) }));
+            s.groceries = list.map((m) => ({ id: uid(), title: cleanMsg(m.title).slice(0, 80), place: cleanMsg(m.place || 'Минимаркет кампуса').slice(0, 60), price: priceOf(m.price), tags: (Array.isArray(m.tags) ? m.tags : []).map((t) => String(t).toLowerCase().slice(0, 24)).slice(0, 1), forDish: cleanMsg(m.forDish || '').slice(0, 60) }));
             s.groceries.sort((a, b) => (b.forDish ? 1 : 0) - (a.forDish ? 1 : 0));
             ui.gcat = 'all';
             const dishes = [...new Set(s.groceries.map((g) => g.forDish).filter(Boolean))];
@@ -3787,9 +3996,10 @@ ${story ? `Последние события истории:\n${story}\nЕсли
                 const r = await aiJSON(`${world(s)}\n\nСтудент ищет на маркетплейсе кампуса: «${q}». Сгенерируй 3–5 объявлений от разных студентов (или магазинчиков кампуса), которые продают или сдают именно это или близкие варианты — разное состояние, разные цены (новое дороже, б/у дешевле).${mundane(s) ? ' Только реальные вещи обычного мира, без магии.' : ' Вещи в духе этого сверхъестественного мира допустимы.'} Если такое в этом мире купить невозможно — верни пустой массив.
 Категория — одна из: ${MARKET_CATS.join(', ')}. Цены в ₡, для ориентира: учебник 300–600, мебель 400–2000, ноутбук 5000–15000.
 Формат: [{"title":"","cat":"","price":500,"rent":0,"seller":"имя, курс","rating":4.5,"verified":true}] — rent: цена аренды в неделю или 0.`);
-                const list = (Array.isArray(r) ? r : []).filter((m) => m && m.title && +m.price > 0);
+                if (S() !== s) return;
+                const list = (Array.isArray(r) ? r : []).filter((m) => m && m.title && priceOf(m.price) !== null);
                 if (!list.length) return toast('info', `Никто на кампусе не продаёт «${q}». Попробуйте сформулировать иначе.`);
-                const add = list.map((m) => ({ id: uid(), title: cleanMsg(m.title).slice(0, 80), cat: MARKET_CATS.includes(m.cat) ? m.cat : 'Оборудование', price: Math.round(+m.price), rent: Math.max(0, Math.round(+m.rent || 0)), seller: cleanMsg(m.seller || 'Студент').slice(0, 40), rating: clamp(+m.rating || 4, 1, 5), verified: m.verified !== false, found: true }));
+                const add = list.map((m) => ({ id: uid(), title: cleanMsg(m.title).slice(0, 80), cat: MARKET_CATS.includes(m.cat) ? m.cat : 'Оборудование', price: priceOf(m.price), rent: priceOf(m.rent, true) ?? 0, seller: cleanMsg(m.seller || 'Студент').slice(0, 40), rating: clamp(+m.rating || 4, 1, 5), verified: m.verified !== false, found: true }));
                 s.market = [...add, ...s.market].slice(0, 60);
                 ui.mq = q; ui.mcat = 'all';
                 toast('success', `Найдено предложений: ${add.length}`);
@@ -3816,7 +4026,7 @@ ${story ? `Последние события истории:\n${story}\nЕсли
             save(s); render();
         },
         sell: (d, el, s) => {
-            const title = val('sh-s-title'), price = Math.round(+val('sh-s-price'));
+            const title = val('sh-s-title'), price = priceOf(val('sh-s-price'));
             if (!title || !(price > 0)) return toast('warning', 'Укажите название и цену.');
             s.listings.unshift({ id: uid(), title, cat: val('sh-s-cat'), price, t: Date.now(), sold: false });
             toast('success', 'Объявление опубликовано.');
@@ -3824,9 +4034,10 @@ ${story ? `Последние события истории:\n${story}\nЕсли
         },
         genMarket: (d, el, s) => withBusy('Загружаю объявления…', async () => {
             const r = await aiJSON(`${world(s)}\n\n${mundane(s) ? 'Сгенерируй 16 объявлений студенческого маркетплейса обычного университета: учебники, конспекты, мебель для общежития, электроника, спортивный инвентарь и т.п. Никакой магии, реалистичные цены в ₡' : 'Сгенерируй 16 объявлений маркетплейса студентов: учебники, мебель, электроника и специализированное оборудование для разных видов'}.\nФормат: [{"title":"","cat":"Учебники|Мебель|Электроника|Оборудование","price":500,"rent":0,"seller":"имя","rating":4.5,"verified":true}] — rent: цена аренды в неделю или 0.`);
-            const list = Array.isArray(r) ? r.filter((m) => m && m.title && +m.price > 0) : [];
+            if (S() !== s) return;
+            const list = Array.isArray(r) ? r.filter((m) => m && m.title && priceOf(m.price) !== null) : [];
             if (!list.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
-            s.market = [...s.market.filter((m) => m.found), ...list.map((m) => ({ id: uid(), title: String(m.title).slice(0, 80), cat: MARKET_CATS.includes(m.cat) ? m.cat : 'Оборудование', price: Math.round(+m.price), rent: Math.max(0, Math.round(+m.rent || 0)), seller: String(m.seller || 'Студент').slice(0, 40), rating: clamp(+m.rating || 4, 1, 5), verified: m.verified !== false }))].slice(0, 60);
+            s.market = [...s.market.filter((m) => m.found), ...list.map((m) => ({ id: uid(), title: String(m.title).slice(0, 80), cat: MARKET_CATS.includes(m.cat) ? m.cat : 'Оборудование', price: priceOf(m.price), rent: priceOf(m.rent, true) ?? 0, seller: String(m.seller || 'Студент').slice(0, 40), rating: clamp(+m.rating || 4, 1, 5), verified: m.verified !== false }))].slice(0, 60);
             save(s);
         }),
 
@@ -3851,7 +4062,9 @@ ${story ? `Последние события истории:\n${story}\nЕсли
         }),
         genEvents: (d, el, s) => withBusy('Ищу мероприятия…', async () => {
             const loreEv = await loreText(/мероприят|праздник|бал|фестивал|турнир|концерт|вечеринк|традици|ярмарк|event|festival|party|tradition/i);
+            if (S() !== s) return;
             const r = await aiJSON(`${world(s)}\n${loreEv ? `\nЛор о событиях и традициях кампуса:\n${loreEv.slice(0, 2500)}\nЕсли там описаны мероприятия или традиции — используй их в первую очередь.\n` : ''}\nПридумай 4 ближайших мероприятия кампуса (${mundane(s) ? 'вечеринки, лекции, спортивные турниры, концерты, ярмарки, конференции' : 'вечеринки, лекции, турниры, ритуалы, ярмарки'}).\nФормат: [{"title":"","when":"например: пятница, 19:00","place":"","desc":"одно предложение"}]`);
+            if (S() !== s) return;
             const list = Array.isArray(r) ? r.filter((e) => e && e.title) : [];
             if (!list.length) return toast('error', 'ИИ вернул ответ не в том формате. Попробуйте ещё раз.');
             s.events = [...s.events.filter((e) => e.lore), ...list.map((e) => ({ id: uid(), title: String(e.title).slice(0, 80), when: String(e.when || '').slice(0, 50), place: String(e.place || '').slice(0, 60), desc: String(e.desc || '').slice(0, 200), going: false }))].slice(0, 12);
@@ -3881,6 +4094,7 @@ ${story ? `Последние события истории:\n${story}\nЕсли
             if (!q) return toast('warning', 'Напишите запрос.');
             return withBusy('Деканат отвечает…', async () => {
                 const a = await aiText(`${world(s)}\n\nСтудент ${s.profile.name} (рейтинг ${rating(s)}%, нарушений ${activeStrikes(s).length}) пишет в деканат через UniHub: «${q}». Ответь от лица деканата: 1–3 предложения, официально, в духе этого мира.`);
+                if (S() !== s) return;
                 s.dean.unshift({ q, a: a || 'Запрос принят, ответ будет направлен позже.', t: Date.now() });
                 const e = byId('sh-dean'); if (e) e.value = '';
                 save(s);
@@ -3920,6 +4134,8 @@ ${story ? `Последние события истории:\n${story}\nЕсли
         },
         resetChat: () => {
             if (!confirm('Удалить все данные UniHub в этом чате? Это необратимо.')) return;
+            const key = chatScope(); clearTimeout(saveJobs.get(key)); saveJobs.delete(key); pendingSaves.delete(key); saveBackups.delete(key); journal(key, null);
+            busyJob = null; ui.busy = '';
             delete ctx().chatMetadata[MODULE]; delete ctx().chatMetadata[OLD_MODULE];
             ui.view = null; ui.tab = 'feed';
             save(); render();
@@ -3946,7 +4162,11 @@ ${story ? `Последние события истории:\n${story}\nЕсли
         }
         if (el.dataset.change === 'relChar' && s) { s.profile.relWithChar = el.checked; save(s); render(); return; }
         if (el.dataset.change === 'privacy' && s) { s.profile.privacy[k] = el.checked; save(s); render(); }
-        else if (el.dataset.change === 'cfg') { const n = Number(el.value); if (Number.isFinite(n)) { cfg()[k] = n; saveCfg(); updateInjection(); } }
+        else if (el.dataset.change === 'cfg') {
+            const n = validSetting(k, el.value);
+            if (n === null) { el.value = cfg()[k]; return toast('warning', `Допустимый диапазон: ${CFG_RANGES[k]?.join('–') || 'проверьте значение'}.`); }
+            cfg()[k] = n; el.value = n; saveCfg(); updateInjection();
+        }
         else if (el.dataset.change === 'cfgBool') { cfg()[k] = el.checked; saveCfg(); updateInjection(); updateFab(); }
     }
     function onKey(e) {
@@ -4055,8 +4275,10 @@ ${story ? `Последние события истории:\n${story}\nЕсли
 
     function onChatChanged() {
         storyGenerating = false;
+        busyJob = null; ui.busy = '';
         ui.view = null; ui.param = null; lastKey = '';
         const s0 = S();
+        if (s0 && pendingSaves.has(chatScope())) save(s0);
         if (s0?.auth) { storySyncState(s0); syncHoraeClock(s0); }
         if (s0 && s0.auth && !s0.campusLoreAt) enqueue(s0, async () => { await extractCampusLore(s0); });
         if (s0 && s0.auth && !s0.genClubsAt) enqueue(s0, async () => { await genClubs(s0); });
@@ -4092,7 +4314,7 @@ ${story ? `Последние события истории:\n${story}\nЕсли
             updateInjection();
         });
         const finish = () => {
-            if (uniHubQuietGenerating) return;
+            if (uniHubQuietGenerating()) return;
             storyGenerating = false;
             try { tick(); } catch (e) { logErr('После ответа истории', e); }
             scheduleStorySync(true);
